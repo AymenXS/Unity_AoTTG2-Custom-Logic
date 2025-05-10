@@ -206,7 +206,6 @@ class Main {
     # Runs every game tick (high frequency)
     function OnTick() {
         # 1. Track human movement velocities
-        # 2. Process active respawn timers
         for (human in Game.PlayerHumans) {
             if (human != null && human.Player != null) {
                 mag = human.Velocity.Magnitude;
@@ -931,9 +930,7 @@ cutscene PvTQuickStart {
         Cutscene.ShowDialogue("Zeke1", "TITAN TIP", "Push as a TEAM, don't fight ALONE!");
         wait 5.0;
 
-        # Explain why AHSS and APG are disabled; and they will soon be enabled
-
-        # 9. Countdown
+        # 6. Countdown
         Cutscene.ShowDialogue("Levi1", "READY?", "Are you Ready for Battle? #RURfB");
         wait 4.0;
         Cutscene.ShowDialogue("Levi1", "FIGHT!", "LET'S GO!");
