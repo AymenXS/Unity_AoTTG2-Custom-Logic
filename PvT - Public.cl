@@ -4,6 +4,7 @@
 # Credits to Lavasuna for the BetterWaves CL
 #
 # Features:
+# - Tutorial and Rules for beginners
 # - Team-based respawn feature with dynamic timers
 # - Velocity-based damage calculations
 # - Win condition tracking (Humans vs Titans)
@@ -11,7 +12,6 @@
 # - Idle mode with automatic respawn
 # - Admin commands for moderation
 # - Custom UI popups for rules and debug info
-# - Player greeting messages
 # - Slow motion ending
 # - Kill to Revive system
 #======================================================================
@@ -152,63 +152,13 @@ class Main {
         Game.SpawnTitansAsync("Default", self.Titans);
     }
 
-    function OnPlayerSpawn(player, character) {
-        # Player greeting logic remains here (player-specific)
-        hasGreetedProperty = player.GetCustomProperty("greeted");
-        if (hasGreetedProperty == null) {
-            hasGreeted = false;
-        }
-        else{
-            hasGreeted = true;
-        }
-
-        if (!hasGreeted) {
-           if (player.Name == "Ariana") 		{self.ShowPlayerGreeting(player.Name, "The LegendAry is HERE!");}
-            elif (player.Name == "Doopad") 		{Game.Print("The 'Nom' Master has Arrived");}
-            elif (player.Name == "Cookies18") 	{Game.Print("Master of Voodoo SHIT is here, who will be the sacrifice today?");}
-            elif (player.Name == "Tornado76") 	{Game.Print("BRACE YOURSELF, THE TORNADO IS HERE!");}
-            elif (player.Name == "Auvre") 		{Game.Print("HELP ME TAKE PICTURES of THE MATCHES AAAAAAAAA!");}
-            elif (player.Name == "Nietoperek") 	{Game.Print("One DAY he will greet us first... :)");}
-            elif (player.Name == "Kamgo") 		{Game.Print("K-k-k-AMGO is HERE???!");}
-            elif (player.Name == "Beef3691") 	{Game.Print("J...JAMIE, You are playing again??!!");}
-            elif (player.Name == "ShiniGami") 	{Game.Print("...Is that even possible? he has risen from the grave?!!");}
-            elif (player.Name == "anunaki") 	{Game.Print(":O | Anunuka has actually joined the game?!!");}
-            elif (player.Name == "Hanji") 		{Game.Print("*Assyrian Distant Sounds* PLAAAYYYBOOOOYYY!");}
-            elif (player.Name == "kaze") 		{Game.Print("'Every Orig Cam Player is Toxic'- NotKaze 2025");}
-            elif (player.Name == "Craggs") 		{Game.Print("'Life is SOLID 5/10' - Craggs 2023");}
-            elif (player.Name == "Symetha") 	{Game.Print("Sy-mi-mo-METHA is IN THE GAME!!");}
-            elif (player.Name == "Lavasuna") 	{Game.Print("Brace yourselves PTs. Lavasuna is on the hunt...");}
-            elif (player.Name == "Alpha") 		{Game.Print("Best <b><s>~Gambler~</s></b> DMG dealer is here");}
-			elif (player.Name == "Jibs") 		{self.ShowPlayerGreeting(player.Name,"J-J-J-JibblyJ!");} # Need to find something epic for Jibs :)
-            elif (player.Name == "Dr.Eisenlocke" || player.Name == "Brise" || player.Name == "Chaos"){ Game.Print("Final Art is here!"); }
-            
-
-            # Mark the player as greeted
-            player.SetCustomProperty("greeted", true);
-            # Game.Print("DEBUG: Player " + player.Name + " 'greeted' property set to true."); # FOR DEBUGGING
-        } 
-        # else {
-        #     Game.Print("DEBUG: Player " + player.Name + " already has 'greeted' property."); # FOR DEBUGGING
-        # }
-
-        KCRevival.OnSpawn();
-        if (Network.IsMasterClient) {
-            Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-        }
-    }
-
-    function ShowPlayerGreeting(playerName, message) {
-        color = "#FFFFFF";
-        size = self._GreetingsFontSize;
-        Game.Print("<size=" + size + "><color='" + color + "'>" + message + "</color></size>");
-    }
-
     /*===== CORE GAME LOOP =====*/
     function OnTick() {
         # Empty or custom tick logic
     }
 
     function OnFrame() {
+        # Will be optimized and re-edited
         for (human in Game.PlayerHumans) {
             if (human != null && human.Player != null) {
                 mag = human.Velocity.Magnitude;
@@ -258,7 +208,6 @@ class Main {
             return;
         }
         
-        # Player-only respawn (excludes AI)
         if (!victim.IsAI) {
             RespawnSystem.QueueRespawn(victim);
         }
@@ -326,6 +275,7 @@ class Main {
             }
         }
 
+        # Update team UI and check win conditions after damage event
         TeamSystem.UpdateTeamUI();
         TeamSystem.CheckVictoryConditions();
     }
@@ -1107,6 +1057,7 @@ extension TeamSystem {
     }
     
     function CheckVictoryConditions() {
+        # Case 1: All humans dead - Titans win
         if (Game.PlayerHumans.Count == 0) {
             # Titans win condition
             ScoreSystem._TitanScore += 1;
@@ -1122,7 +1073,9 @@ extension TeamSystem {
             } else {
                 Game.End(10);
             }
+        # Case 2: All player titans dead - check AI conditions
         } elif (Game.PlayerTitans.Count == 0) {
+            # Full Clear mode requires eliminating all AI titans
             if (Main.FullClear) {
                 if (Game.AITitans.Count == 0) {
                     ScoreSystem._HumanScore += 1;
