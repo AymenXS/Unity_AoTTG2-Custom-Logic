@@ -322,7 +322,7 @@ class Main {
                     damage,
                     weapon
                 );
-                ScoreSystem.UpdateScore(victim.Player, true, 0, false);
+                ScoreSystem.UpdateScore(victim.Player, false, 0, false);
             }
         }
 
