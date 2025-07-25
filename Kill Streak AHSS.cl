@@ -4,12 +4,14 @@ class Main
     Titans = 15;
     _hasSpawned = false;
     
-    # Titan kill reward system
+    # AHSS unlock system
     PointsForAHSS = 5;
     PlayerData = Dict(); # {playerName: {points: int, unlocked: bool}}
-    _ahssUnlocker = null;  # Name of first unlocker
-    _ahssUnlocked = false; # Global unlock status
+    _ahssUnlocker = null;
+    _ahssUnlocked = false;
+    _ahssConfirmationEnabled = true; # Toggle for confirmation prompt
 
+    # Initialize player data
     function InitPlayerData(playerName)
     {
         if (!self.PlayerData.Contains(playerName))
@@ -22,6 +24,7 @@ class Main
         return self.PlayerData.Get(playerName);
     }
 
+    # Game start logic
     function OnGameStart()
     {
         if (Network.IsMasterClient)
@@ -29,24 +32,22 @@ class Main
             Game.SpawnTitans("Default", self.Titans);
             UI.SetLabelAll("TopCenter", "Titans Left: " + self.Titans);
         }
-        # Reset unlock state at game start
         self._ahssUnlocker = null;
         self._ahssUnlocked = false;
         self.PlayerData.Clear();
     }
 
+    # Player join handling
     function OnPlayerJoin(player)
     {
-        # Initialize new player's data
         self.InitPlayerData(player.Name);
-        
-        # If AHSS was already unlocked, sync this to new player
         if (self._ahssUnlocked && Network.IsMasterClient)
         {
             Network.SendMessage(player, "AHSS_LOCKED");
         }
     }
 
+    # Titan kill reward system
     function OnCharacterDie(victim, killer, killerName)
     {
         if (victim == null || killer == null) {return;}
@@ -54,11 +55,9 @@ class Main
         if (victim.Type == "Titan" && killer.Type == "Human")
         {
             playerName = killer.Name;
-            
-            # Safely get player data with initialization
             currentData = self.InitPlayerData(playerName);
             
-            # Don't allow points if AHSS was already unlocked by someone
+            # Block points if AHSS was already unlocked by someone else
             if (self._ahssUnlocked && playerName != self._ahssUnlocker)
             {
                 if (killer.IsMine)
@@ -68,27 +67,27 @@ class Main
                 return;
             }
             
+            # Award point
             currentPoints = currentData.Get("points") + 1;
             currentData.Set("points", currentPoints);
             
-            # Show progress only to the killer
+            # Show progress to killer
             if (killer.IsMine)
             {
                 Game.Print("Titan Kill! Points: " + currentPoints + "/" + self.PointsForAHSS);
             }
             
-            # Check if AHSS should be unlocked
+            # Check for unlock threshold
             if (!self._ahssUnlocked && 
                 currentPoints >= self.PointsForAHSS && 
                 !currentData.Get("unlocked"))
             {
-                # Mark AHSS as unlocked
                 self._ahssUnlocked = true;
                 self._ahssUnlocker = playerName;
                 currentData.Set("unlocked", true);
                 self.HandleAHSSUnlock(killer);
                 
-                # Sync with all clients if master
+                # Sync with all clients
                 if (Network.IsMasterClient)
                 {
                     Network.SendMessageAll("AHSS_UNLOCK|" + playerName);
@@ -97,11 +96,61 @@ class Main
         }
     }
 
+    # AHSS unlock handler (with optional confirmation)
+    function HandleAHSSUnlock(character)
+    {
+        if (character == null || character.Type != "Human") {return;}
+        if (character.Name != self._ahssUnlocker) {return;}
+
+        if (self._ahssConfirmationEnabled && character.IsMine)
+        {
+            # Start confirmation coroutine
+            self.AHSSConfirmation(character);
+            return;
+        }
+        
+        # Skip confirmation if disabled
+        self.ActivateAHSS(character);
+    }
+
+    # Coroutine: Waits for player confirmation
+    coroutine AHSSConfirmation(character)
+    {
+        # Show prompt
+        UI.SetLabel("MiddleCenter", character.Name + 
+            "<color=yellow>Press F to unlock AHSS</color>");
+
+        # Wait for F key press
+        while (!Input.GetKeyHold("Human/Reload"))
+        {
+            wait 0.1; # Check every 0.1 seconds
+        }
+
+        # Confirmed - unlock AHSS
+        UI.ClearLabel(character.Player, "MiddleCenter");
+        self.ActivateAHSS(character);
+    }
+
+    # Actual AHSS activation logic
+    function ActivateAHSS(character)
+    {
+        character.SetWeapon("AHSS");
+        character.CurrentAmmoRound = 30;
+        character.CurrentAmmoLeft = 120;
+        
+        if (character.IsMine) {
+            Game.Print("<color=#FFD700>AHSS unlocked!</color>");
+            character.PlaySound("Checkpoint");
+        }
+        
+        Game.PrintAll(character.Name + " has unlocked AHSS!");
+    }
+
+    # Network message handling
     function OnNetworkMessage(sender, message)
     {
         if (message == "AHSS_LOCKED")
         {
-            # New player received lock notification
             self._ahssUnlocked = true;
             if (Network.MyPlayer != null)
             {
@@ -113,25 +162,21 @@ class Main
         parts = String.Split(message, "|");
         if (parts.Count < 2) {return;}
         
-        messageType = parts.Get(0);
-        playerName = parts.Get(1);
-        
-        if (messageType == "AHSS_UNLOCK")
+        if (parts.Get(0) == "AHSS_UNLOCK")
         {
-            # Only process if AHSS wasn't already unlocked
+            playerName = parts.Get(1);
             if (!self._ahssUnlocked)
             {
                 self._ahssUnlocked = true;
                 self._ahssUnlocker = playerName;
-                
-                # Initialize and update player data
                 self.InitPlayerData(playerName).Set("unlocked", true);
                 
+                # Handle local player unlock
                 if (Network.MyPlayer != null && Network.MyPlayer.Name == playerName)
                 {
                     if (Network.MyPlayer.Character != null)
                     {
-                        self.HandleAHSSUnlock(Network.MyPlayer.Character);
+                        self.ActivateAHSS(Network.MyPlayer.Character);
                     }
                     else
                     {
@@ -142,39 +187,15 @@ class Main
         }
     }
 
-    function HandleAHSSUnlock(character)
-    {
-        if (character == null || character.Type != "Human") {return;}
-        
-        # Only proceed if this is the designated unlocker
-        if (character.Name != self._ahssUnlocker) {return;}
-        
-        # Give AHSS to the current character
-        character.SetWeapon("AHSS");
-        character.CurrentAmmoRound = 30;
-        character.CurrentAmmoLeft = 120;
-        
-        # Force AHSS loadout for future spawns
-        if (character.IsMine) {
-            Game.Print("<color=#FFD700>AHSS unlocked!</color>");
-            character.PlaySound("Checkpoint");
-        }
-        
-        Game.PrintAll(character.Name + " has unlocked AHSS!");
-    }
-
+    # Game state checks
     function OnTick()
     {
-        # Game state checks
         if (Network.IsMasterClient && !Game.IsEnding)
         {
             titans = Game.Titans.Count;
             humans = Game.Humans.Count;
             
-            if (humans > 0)
-            {
-                self._hasSpawned = true;
-            }
+            if (humans > 0) {self._hasSpawned = true;}
             
             if (titans == 0)
             {
