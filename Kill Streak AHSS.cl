@@ -6,7 +6,10 @@ class Main
     
     # AHSS unlock system
     PointsForAHSS = 5;
-    PlayerData = Dict(); # {playerName: {points: int, unlocked: bool}}
+    AITitanPointValue = 0.1;  # Points per AI Titan kill
+    PlayerTitanPointValue = 1; # Points per Player Titan kill
+    
+    PlayerData = Dict(); # {playerName: {points: float, unlocked: bool}}
     _ahssUnlocker = null;
     _ahssUnlocked = false;
     _ahssConfirmationEnabled = true;
@@ -17,7 +20,7 @@ class Main
         if (!self.PlayerData.Contains(playerName))
         {
             playerData = Dict();
-            playerData.Set("points", 0);
+            playerData.Set("points", 0.0); # Changed to float
             playerData.Set("unlocked", false);
             self.PlayerData.Set(playerName, playerData);
         }
@@ -49,7 +52,7 @@ class Main
     }
 
     # Titan kill reward system
-    function OnCharacterDie(victim, killer, killerName)
+      function OnCharacterDie(victim, killer, killerName)
     {
         if (victim == null || killer == null) {return;}
         
@@ -64,8 +67,17 @@ class Main
                 return;
             }
             
-            # Award point
-            currentPoints = currentData.Get("points") + 1;
+            # Award points based on Titan type
+            if (victim.IsAI)
+            {
+                pointsToAdd = self.AITitanPointValue;
+            }
+            else
+            {
+                pointsToAdd = self.PlayerTitanPointValue;
+            }
+            
+            currentPoints = currentData.Get("points") + pointsToAdd;
             currentData.Set("points", currentPoints);
             
             # Update counter for all players
@@ -74,17 +86,17 @@ class Main
             # Check for unlock threshold
             if (!self._ahssUnlocked && 
                 currentPoints >= self.PointsForAHSS && 
-                !currentData.Get("unlocked")) {
-
+                !currentData.Get("unlocked"))
+            {
                 self._ahssUnlocked = true;
                 self._ahssUnlocker = playerName;
                 currentData.Set("unlocked", true);
                 
-                # Clear all counters
+                # Clear counters
                 if (Network.IsMasterClient)
                 {
                     UI.SetLabelAll("TopRight", "");
-                    UI.SetLabelAll("TopCenter", "AHSS Unlocked!");  # Optional notification
+                    UI.SetLabelAll("TopCenter", "AHSS Unlocked!");
                 }
                 
                 self.HandleAHSSUnlock(killer);
@@ -92,24 +104,25 @@ class Main
                 {
                     Network.SendMessageAll("AHSS_UNLOCK|" + playerName);
                 }
-            } elif (!self._ahssUnlocked) {
-                # Update counter for all players
+            }
+            elif (!self._ahssUnlocked)
+            {
                 self.UpdateProgressCounter(playerName, currentPoints);
             }
+        }
     }
-}
 
     # Update progress counter for all players
     function UpdateProgressCounter(playerName, currentPoints)
+{
+    if (self._ahssUnlocked) {return;}
+    
+    if (Network.IsMasterClient)
     {
-        if (self._ahssUnlocked) {return;}  # Don't update if already unlocked
-        
-        if (Network.IsMasterClient)
-        {
-            text = playerName + ": " + currentPoints + "/" + self.PointsForAHSS;
-            UI.SetLabelAll("TopRight", text);
-        }
+        text = playerName + ": " + String.FormatFloat(currentPoints, 1) + "/" + self.PointsForAHSS;
+        UI.SetLabelAll("TopRight", text);
     }
+}
 
     # Update titan counter
     function UpdateTitanCounter()

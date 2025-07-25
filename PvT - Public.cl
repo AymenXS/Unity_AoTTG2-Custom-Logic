@@ -14,6 +14,7 @@
 # - Custom UI popups for rules and debug info
 # - Slow motion ending
 # - Kill to Revive system
+# - AHSS unlock system with point tracking
 #======================================================================
 class Main {    
     /*===== GAME CONFIGURATION =====*/
@@ -85,10 +86,9 @@ class Main {
     /*===== INITIALIZATION =====*/
     function Init() {
         # Initialize Idle System
-        IdleHandler.AfkOn = self.IdleMode;
-        IdleHandler.AfkKillTime = self.IdleKillTime;
-        IdleHandler.IdleRespawn = self.IdleRespawn;
-
+        IdleSystem.AfkOn = self.IdleMode;
+        IdleSystem.AfkKillTime = self.IdleKillTime;
+        IdleSystem.IdleRespawn = self.IdleRespawn;
         # Initialize Respawn System
         RespawnSystem.BaseRespawnTime = self.BaseRespawnTime;
         RespawnSystem.MinRespawnTime = self.MinRespawnTime;
@@ -96,69 +96,93 @@ class Main {
         RespawnSystem.RespawnTitanScale = self.RespawnTitanScale;
         RespawnSystem.respawn_timers = new Dict();
         RespawnSystem.respawn_timer_keys = new List();
-
+        
         # Initialize Score System
         ScoreSystem._HumanScore = RoomData.GetProperty("human_wins", 0);
         ScoreSystem._TitanScore = RoomData.GetProperty("titan_wins", 0);
-        
-        # Initialize Team System
+         # Initialize Team System
         TeamSystem.FullClear = self.FullClear;
         
         # Initialize Rock Throwers
         self.rockthrowers = String.Split(self.AuthorizedRockThrower, "-");
+        AHSSUnlockSystem.Initialize();
+        KCRevival.Init();
+        RockThrowSystem.Init();
         
-        # Initialize UI
+        # Configure UI
         UI.SetLabel("MiddleCenter", "");
         Game.DefaultShowKillFeed = false;
         Game.DefaultShowKillScore = false;
         Game.DefaultAddKillScore = false;
-        
-        # Configure scoreboard
+
+         # Configure scoreboard
         UI.SetScoreboardProperty("KDRA");
         UI.SetScoreboardHeader("Kills / Deaths / Max / Total");
-
-        # Load player stats
-        Network.MyPlayer.Kills = RoomData.GetProperty("kills", 0);
-        Network.MyPlayer.Deaths = RoomData.GetProperty("deaths", 0);
-        Network.MyPlayer.HighestDamage = RoomData.GetProperty("highdmg", 0);
-        Network.MyPlayer.TotalDamage = RoomData.GetProperty("totdmg", 0);
-        
-        # Initialize game state
-        ScoreSystem.updateScore(Network.MyPlayer, false, 0, true);
-        TeamSystem.updateTeamUI();
-        
-        # Initialize popups
-        self.createRulesPopup();
-        self.createDebugPopup();
-        
-        # Sync wins if MasterClient
-        if (Network.IsMasterClient) {
-            Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-        }
         
         # Show tutorial if needed
-        self.tutorialShown = RoomData.GetProperty("tutorial_shown", false);
-        if (!self.tutorialShown) {
+        if (!RoomData.GetProperty("tutorial_shown", false)) {
             Cutscene.Start("PvTQuickStart", true);
-            self.tutorialShown = true;
             RoomData.SetProperty("tutorial_shown", true);
         }
-        
-        # Initialize KC Revival
-        KCRevival.ResetState(); 
     }
 
     function OnGameStart() {
         Game.SpawnTitansAsync("Default", self.Titans);
     }
 
-    /*===== CORE GAME LOOP =====*/
+    /*===== EVENT HANDLERS =====*/
+
     function OnTick() {
         # Empty or custom tick logic
     }
-
     function OnFrame() {
-        # Will be optimized and re-edited
+        MovementSystem.TrackMovement();
+        IdleSystem.OnFrame();
+    }
+
+    function OnSecond() {
+        KCRevival.OnSecond();
+        IdleSystem.OnSecond();
+        RespawnSystem.OnSecond();
+        RockThrowSystem.OnSecond();
+    }
+
+    function OnCharacterSpawn(character) {
+        TeamSystem.UpdateTeamUI();
+        RockThrowSystem.HandleSpawn(character);
+    }
+
+    function OnCharacterDamaged(victim, killer, killerName, damage) {   
+        DamageSystem.HandleDamage(victim, killer, killerName, damage);
+        TeamSystem.CheckVictoryConditions();
+    }
+
+    function OnCharacterDie(victim, killer, killerName) {
+        AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);
+        DeathSystem.HandleDeath(victim, killer, killerName);
+    }
+
+    function OnNetworkMessage(sender, message) {
+        NetworkSystem.HandleMessage(sender, message);
+    }
+
+    function OnChatInput(message) {
+        return CommandSystem.HandleCommand(message);
+    }
+
+    function OnButtonClick(buttonName) {
+        UISystem.HandleButtonClick(buttonName);
+    }
+}
+
+#======================================================================
+# EXTENSIONS
+#======================================================================
+
+extension MovementSystem {
+    lastMagnitudes = new Dict();
+
+    function TrackMovement() {
         for (human in Game.PlayerHumans) {
             if (human != null && human.Player != null) {
                 mag = human.Velocity.Magnitude;
@@ -167,42 +191,11 @@ class Main {
                 }
             }
         }
-
-        IdleHandler.OnFrame();   
     }
+}
 
-    function OnSecond() {
-        KCRevival.OnSecond();
-        IdleHandler.OnSecond();
-        RespawnSystem.OnSecond();
-
-        # Disable rock throw for non-authorized titans
-        if (Network.MyPlayer != null && 
-            Network.MyPlayer.Character != null && 
-            Network.MyPlayer.Character.Type == "Titan" && 
-            Network.MyPlayer.Status == "Alive" && 
-            !self.rockthrowers.Contains(Convert.ToString(Network.MyPlayer.ID))) {
-            
-            Input.SetKeyDefaultEnabled("Titan/AttackRockThrow", false);
-        }
-    }
-
-    /*===== GAME EVENTS =====*/
-    function OnCharacterSpawn(character) {
-        TeamSystem.UpdateTeamUI();
-        
-        # Add special outlines for titans
-        if (character.Type == "Titan" && !character.IsAI) {
-            playerID = Convert.ToString(character.Player.ID);
-            
-            # Red outline for rock throwers
-            if (self.rockthrowers.Contains(playerID)) {
-                character.AddOutline(Color("#FF0000"), "OutlineVisible");
-            }
-        }
-    }
-
-    function OnCharacterDamaged(victim, killer, killerName, damage) {   
+extension DamageSystem {
+    function HandleDamage(victim, killer, killerName, damage) {
         # Basic validation
         if (victim == null || victim.Health > 0 || victim.Player == null) {
             return;
@@ -217,75 +210,85 @@ class Main {
         
         # Human killer case
         if (killerName != "Rock" && killer != null && killer.Type == "Human") {
-            weapon = killer.Weapon;
-            damage = damage;
+            self.HandleHumanKiller(victim, killer, killerName, damage, weapon);
+        }
+        
+        # Titan killer case
+        if (killerName != "Rock" && killer != null && killer.Type == "Titan") {
+            self.HandleTitanKiller(victim, killer, killerName, weapon);
+        }
+        
+        # Rock kill case
+        if (killerName == "Rock") {
+            self.HandleRockKill(victim, weapon);
+        }
+    }
+
+    function HandleHumanKiller(victim, killer, killerName, damage, weapon) {
+        weapon = killer.Weapon;
+        damage = damage;
+        
+        Game.ShowKillFeed(
+            TeamSystem.TeamHeader(killer),
+            TeamSystem.TeamHeader(victim),
+            damage,
+            weapon
+        );
+        
+        # Update killer's score if local player
+        if (killer.Name == Network.MyPlayer.Name) {
+            Game.ShowKillScore(damage);
+            ScoreSystem.UpdateScore(killer.Player, true, damage, false);
+        } 
+        
+        # Update victim's score if local player
+        if (victim.Name == Network.MyPlayer.Name) {
+            ScoreSystem.UpdateScore(victim.Player, false, 0, false);
+        }
+    }
+
+    function HandleTitanKiller(victim, killer, killerName, weapon) {
+        if (victim.Name == Network.MyPlayer.Name) {
+            # Calculate velocity-based damage
+            damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
             
-            Game.ShowKillFeed(
+            Game.ShowKillFeedAll(
                 TeamSystem.TeamHeader(killer),
                 TeamSystem.TeamHeader(victim),
                 damage,
                 weapon
             );
-            
-            # Update killer's score if local player
-            if (killer.Name == Network.MyPlayer.Name) {
-                Game.ShowKillScore(damage);
-                ScoreSystem.UpdateScore(killer.Player, true, damage, false);
-            } 
-            
-            # Update victim's score if local player
-            if (victim.Name == Network.MyPlayer.Name) {
-                ScoreSystem.UpdateScore(victim.Player, false, 0, false);
-            }
+            ScoreSystem.UpdateScore(victim.Player, false, 0, false);
         }
         
-        # Titan killer case
-        if (killerName != "Rock" && killer != null && killer.Type == "Titan") {
-            if (victim.Name == Network.MyPlayer.Name) {
-                # Calculate velocity-based damage
-                damage = self.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
-                
-                Game.ShowKillFeedAll(
-                    TeamSystem.TeamHeader(killer),
-                    TeamSystem.TeamHeader(victim),
-                    damage,
-                    weapon
-                );
-                ScoreSystem.UpdateScore(victim.Player, false, 0, false);
-            }
-            
-            if (killer.Name == Network.MyPlayer.Name) {
-                ScoreSystem.UpdateScore(killer.Player, true, 0, false);
-            }
+        if (killer.Name == Network.MyPlayer.Name) {
+            ScoreSystem.UpdateScore(killer.Player, true, 0, false);
         }
-        
-        # Rock kill case
-        if (killerName == "Rock") {
-            if (victim.Name == Network.MyPlayer.Name) {
-                # Calculate velocity-based damage
-                damage = self.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
-                
-                Game.ShowKillFeedAll(
-                    "<b><color='#ff0000'>ROCK</color></b>",
-                    TeamSystem.TeamHeader(victim),
-                    damage,
-                    weapon
-                );
-                ScoreSystem.UpdateScore(victim.Player, false, 0, false);
-            }
-        }
-
-        # Update team UI and check win conditions after damage event
-        TeamSystem.UpdateTeamUI();
-        TeamSystem.CheckVictoryConditions();
     }
 
-    function OnCharacterDie(victim, killer, killerName) {
+    function HandleRockKill(victim, weapon) {
+        if (victim.Name == Network.MyPlayer.Name) {
+            # Calculate velocity-based damage
+            damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
+            
+            Game.ShowKillFeedAll(
+                "<b><color='#ff0000'>ROCK</color></b>",
+                TeamSystem.TeamHeader(victim),
+                damage,
+                weapon
+            );
+            ScoreSystem.UpdateScore(victim.Player, false, 0, false);
+        }
+    }
+}
+
+extension DeathSystem {
+    function HandleDeath(victim, killer, killerName) {
         if (victim.Type == "Human" && victim.IsMine && victim.IsMainCharacter) {
             KCRevival.OnDeath();
         }
 
-        if (victim.Type == "Titan" && killer != null) {
+         if (victim.Type == "Titan" && killer != null) {
             value = 1;
             if (killer.Type == "Human") {
                 if (killer.Weapon != "Blade") {
@@ -295,153 +298,142 @@ class Main {
             KCRevival.ProcessTitanKill(killerName, value);
         }
     }
+}
 
-    function OnNetworkMessage(sender, message) {
-        # Moderator commands
-        if (String.StartsWith(message, "mod:") && Network.IsMasterClient) {
-            if (sender.ID == self.Moderator) {
-                cmd = String.Substring(message, 4);
-                if (cmd == "resetkdall" || cmd == "clearchat" || cmd =="reviveall") {
-                    Network.SendMessageAll(cmd);
-                    Game.Print("Moderator used command: #" + cmd);
-                }
-            }
+extension NetworkSystem {
+    function HandleMessage(sender, message) {
+        if (message == "AHSS_LOCKED") {
+            AHSSUnlockSystem._ahssUnlocked = true;
+        }
+        elif (String.StartsWith(message, "AHSS_UNLOCK|")) {
+            # Handle AHSS unlock sync
+        }
+        elif (String.StartsWith(message, "mod:")) {
+            self.HandleModCommand(sender, message);
         } 
-        
-        # Win sync handling
-        if (String.StartsWith(message, "WinSync:")) {
-            dataStr = String.Substring(message, 8);
-            pairs = String.Split(dataStr, ";");
-            
-            human = ScoreSystem._HumanScore;
-            titan = ScoreSystem._TitanScore;
-            
-            for (pair in pairs) {
-                if (String.Contains(pair, "human_wins=")) {
-                    human = Convert.ToInt(String.Substring(pair, 11));
-                }
-                elif (String.Contains(pair, "titan_wins=")) {
-                    titan = Convert.ToInt(String.Substring(pair, 11));
-                }
-                elif (String.Contains(pair, "teamone_wins=")) {
-                    human = Convert.ToInt(String.Substring(pair, 13));
-                }
-                elif (String.Contains(pair, "teamtwo_wins=")) {
-                    titan = Convert.ToInt(String.Substring(pair, 13));
-                }
-            }
-            
-            ScoreSystem._HumanScore = human;
-            ScoreSystem._TitanScore = titan;
-            RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-            RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
-            TeamSystem.UpdateTeamUI();
+        elif (String.StartsWith(message, "WinSync:")) {
+            ScoreSystem.HandleWinSync(message);
         }
-        
-        # Slow motion handling
-        if (String.StartsWith(message, "slowmo")) {
-            if (message == "slowmo_off") {
-                Time.TimeScale = 1.0;
-                Game.Print("Slow motion disabled");
-            } else {
-                Time.TimeScale = 0.33;
-                Game.Print("Slow motion enabled");
+        elif (String.StartsWith(message, "slowmo")) {
+            self.HandleSlowMo(message);
+        }
+        elif (String.StartsWith(message, "clearchat")) {
+            self.HandleClearChat(sender, message);
+        }
+    }
+
+    function HandleModCommand(sender, message) {
+        if (Network.IsMasterClient && sender.ID == Main.Moderator) {
+            cmd = String.Substring(message, 4);
+            if (cmd == "resetkdall" || cmd == "clearchat" || cmd == "reviveall") {
+                Network.SendMessageAll(cmd);
+                Game.Print("Moderator used command: #" + cmd);
             }
         }
-        
-        # Chat clearing
-        if (String.StartsWith(message, "clearchat") && sender == Network.MasterClient) {
+    }
+
+    function HandleSlowMo(message) {
+        if (message == "slowmo_off") {
+            Time.TimeScale = 1.0;
+            Game.Print("Slow motion disabled");
+        } else {
+            Time.TimeScale = 0.33;
+            Game.Print("Slow motion enabled");
+        }
+    }
+
+    function HandleClearChat(sender, message) {
+        if (sender == Network.MasterClient) {
             for (i in Range(0, 25, 1)) {
                 Game.Print(String.Newline);
             }
             Game.Print("Chat has been cleared by admin.");
         }
+    }
+}
 
-        # If "resetkdall" message received is masterclient, reset OWN KDR
-		# if (String.StartsWith(message, "resetkdall") && sender == Network.MasterClient) {
-		# 	ScoreSystem.resetKD(Network.MyPlayer);
-        #     Game.Print("Your stats have been reset.");
-		# 	return false;
-		# }
+extension UISystem {
+    rulesPopupCreated = false;
+    debugPopupCreated = false;
 
-        # ADD resetkdall for Moderator
-        # ADD reviveall for Moderator
+    function HandleButtonClick(buttonName) {
+        if (buttonName == "CloseRules" || buttonName == "CloseDebug") {
+            UI.HidePopup("RulesPopup");
+        }
     }
 
-    function OnChatInput(message) {
-        return AdminCommands.HandleCommand(message);
-    }
-
-    /*===== UI FEATURES =====*/
-    function createRulesPopup() {
+    function CreateRulesPopup() {
         if (self._rulesPopupCreated) {return;}
         
-        # Create popup
         UI.CreatePopup("RulesPopup", "Original Gamemode PvT - GUIDELINES", 900, 700);
         
-        # Header 
-        UI.AddPopupLabel("RulesPopup", 
-            "<color=#AAAAAA>These guidelines help maintain balanced gameplay. " +
-            String.Newline +
-            "Host may adjust rules to ensure everyone is having fun!</color>" + 
-            String.Newline + String.Newline +
-            "<size=24><color=#FF5555>WEAPON RESTRICTIONS</color></size>");
-        
-        # Weapon rules
-        UI.AddPopupLabel("RulesPopup", 
-            "<color=#FF9999>NO APG/AHSS/TS weapons allowed (OP Against PTs)</color>" + 
-            String.Newline + 
+        # Add content sections
+        self.AddRulesSection("WEAPON RESTRICTIONS", 
+            "NO APG/AHSS/TS weapons allowed (OP Against PTs)\n" +
             "  <size=16><i>(Will be enabled in future updates)</i></size>");
-        
-        # Respawn rules
-        UI.AddPopupLabel("RulesPopup", 
-            String.Newline + "<size=24><color=#55FF55>RESPAWN</color></size>" +
-            String.Newline +
-            "Base respawn: <color=#FFFF00>60 seconds</color>" +
-            String.Newline +
+            
+        self.AddRulesSection("RESPAWN", 
+            "Base respawn: <color=#FFFF00>60 seconds</color>\n" +
             "Adjusted down to <color=#FFFF00>30s minimum</color> for disadvantaged teams");
-
-        # Titan abilities
-        UI.AddPopupLabel("RulesPopup", 
-            String.Newline + "<size=24><color=#FFAA00>TITAN ABILITIES</color></size>" +
-            String.Newline +
-            "<color=#FFCC00>Rock throw limited to 2 PTs max</color>" +
-            String.Newline +
-            "Throwers chosen randomly each round" +
-            String.Newline +
+            
+        self.AddRulesSection("TITAN ABILITIES", 
+            "<color=#FFCC00>Rock throw limited to 2 PTs max</color>\n" +
+            "Throwers chosen randomly each round\n" +
             "<size=16><i>(Host may occasionally allow 3PT)</i></size>");
         
-        # Close button 
         UI.AddPopupBottomButton("RulesPopup", "CloseRules", 
             UI.WrapStyleTag("UNDERSTOOD", "color", "#FFFFFF"));
         
         self._rulesPopupCreated = true;
     }
 
-    function createDebugPopup() {
-        if (self._debugPopupCreated) {return;}
-        
-        # Create popup
-        UI.CreatePopup("DebugPopup", "Original Gamemode PvT - GUIDELINES", 900, 700);
-        
-        # Header 
-        UI.AddPopupLabel("DebugPopup", Game.Loadouts + " - Debug Mode");
-        
-        # Close button 
-        UI.AddPopupBottomButton("DebugPopup", "CloseDebug", 
-            UI.WrapStyleTag("UNDERSTOOD", "color", "#FFFFFF"));
-        
-        self._debugPopupCreated = true;
+    function AddRulesSection(title, content) {
+        UI.AddPopupLabel("RulesPopup", 
+            String.Newline + "<size=24><color=#" + self.GetTitleColor(title) + ">" + title + "</color></size>\n" +
+            content);
     }
 
-    function OnButtonClick(buttonName) {
-        if (buttonName == "CloseRules" || buttonName == "CloseDebug") {
-            UI.HidePopup("RulesPopup");
+    function GetTitleColor(title) {
+        colors = {
+            "WEAPON RESTRICTIONS": "FF5555",
+            "RESPAWN": "55FF55", 
+            "TITAN ABILITIES": "FFAA00"
+        };
+        return colors.Get(title, "FFFFFF");
+    }
+}
+
+extension RockThrowSystem {
+    rockthrowers = new List();
+    
+    function Init() {
+        self.rockthrowers = String.Split(Main.AuthorizedRockThrower, "-");
+    }
+    
+    function OnSecond() {
+        if (Network.MyPlayer != null && 
+            Network.MyPlayer.Character != null && 
+            Network.MyPlayer.Character.Type == "Titan" && 
+            Network.MyPlayer.Status == "Alive" && 
+            !self.rockthrowers.Contains(Convert.ToString(Network.MyPlayer.ID))) {
+            
+            Input.SetKeyDefaultEnabled("Titan/AttackRockThrow", false);
+        }
+    }
+    
+    function HandleSpawn(character) {
+        if (character.Type == "Titan" && !character.IsAI) {
+            playerID = Convert.ToString(character.Player.ID);
+            
+            # Red outline for rock throwers
+            if (self.rockthrowers.Contains(playerID)) {
+                character.AddOutline(Color("#FF0000"), "OutlineVisible");
+            }
         }
     }
 }
 
-extension AdminCommands {
+extension CommandSystem {
     function HandleCommand(message) {
         if (String.StartsWith(message, "#")) {
             message = String.ToLower(message);
@@ -645,7 +637,138 @@ extension AdminCommands {
     }
 }
 
-extension IdleHandler {
+extension AHSSUnlockSystem
+{
+    # Configuration - adjust these values as needed
+    PointsForAHSS = 15;
+    AITitanPointValue = 1;
+    PlayerTitanPointValue = 5;
+    _ahssConfirmationEnabled = true;
+    
+    # State tracking
+    PlayerData = Dict();
+    _ahssUnlocker = null;
+    _ahssUnlocked = false;
+    
+    # Initialization
+    function Initialize()
+    {
+        self.PlayerData.Clear();
+        self._ahssUnlocker = null;
+        self._ahssUnlocked = false;
+    }
+    
+    # Core functionality
+    function ProcessTitanKill(victim, killer, killerName)
+    {
+        if (victim == null || killer == null || killer.Type != "Human") {return false;}
+        
+        playerName = killer.Name;
+        currentData = self.GetPlayerData(playerName);
+        
+        # Block if already unlocked by someone else
+        if (self._ahssUnlocked && playerName != self._ahssUnlocker) {return false;}
+        
+        # Calculate points
+         if (victim.IsAI)
+    {
+        pointsToAdd = self.AITitanPointValue;
+    }
+    else
+    {
+        pointsToAdd = self.PlayerTitanPointValue;
+    }
+        newPoints = currentData.Get("points") + pointsToAdd;
+        currentData.Set("points", newPoints);
+        
+        # Check for unlock
+        if (!self._ahssUnlocked && newPoints >= self.PointsForAHSS && !currentData.Get("unlocked"))
+        {
+            currentData.Set("unlocked", true);
+            return self.HandleUnlock(killer, playerName);
+        }
+        
+        self.UpdatePlayerCounter(playerName, newPoints);
+        return false;
+    }
+    
+    # Helper functions
+    function GetPlayerData(playerName)
+    {
+        if (!self.PlayerData.Contains(playerName))
+        {
+            data = Dict();
+            data.Set("points", 0.0);
+            data.Set("unlocked", false);
+            self.PlayerData.Set(playerName, data);
+        }
+        return self.PlayerData.Get(playerName);
+    }
+    
+    function UpdatePlayerCounter(playerName, points)
+    {
+        if (self._ahssUnlocked) {return;}
+        
+        formattedPoints = String.FormatFloat(points, 1);
+        text = playerName + ": " + formattedPoints + "/" + self.PointsForAHSS;
+        UI.SetLabelAll("TopRight", text);
+    }
+    
+    function HandleUnlock(character, playerName)
+    {
+        self._ahssUnlocked = true;
+        self._ahssUnlocker = playerName;
+        
+        UI.SetLabelAll("TopRight", "");
+        UI.SetLabelAll("TopCenter", "AHSS Unlocked!");
+        
+        if (self._ahssConfirmationEnabled && character.IsMine)
+        {
+            self.StartConfirmation(character);
+        }
+        else
+        {
+            self.ActivateAHSS(character);
+        }
+        
+        return true;
+    }
+    
+    coroutine StartConfirmation(character)
+    {
+        UI.SetLabelForTime("TopRight", "Hold <color=yellow>'Reload'</color> to unlock AHSS", 5);
+        
+        while (!Input.GetKeyHold("Human/Reload"))
+        {
+            wait 0.1;
+        }
+        
+        self.ActivateAHSS(character);
+    }
+    
+    function ActivateAHSS(character)
+    {
+        if (character.Type != "Human") {return;}
+        
+        character.SetWeapon("AHSS");
+        character.CurrentAmmoRound = 2;
+        character.CurrentAmmoLeft = 3;
+        character.MaxAmmoRound = 2;
+        character.MaxAmmoTotal = 3;
+        
+        if (character.IsMine)
+        {
+            character.PlaySound("AHSSGunShotDouble2");
+        }
+        
+        if (Network.IsMasterClient)
+        {
+            Game.PrintAll(character.Name + " has unlocked AHSS!");
+        }
+    }
+}
+
+extension IdleSystem {
     AfkOn = true;
     AfkKillTime = 60;
     IsAfk = false;
@@ -738,7 +861,7 @@ extension KCRevival {
     }
 
     function ShowRevivalCount() {
-        if (Network.MyPlayer.Status != "Dead" || IdleHandler.IsAfk)
+        if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
         {
             return;
         }
@@ -764,7 +887,7 @@ extension KCRevival {
 
     function ProcessTitanKill(killerName, value)
     {
-        if (Network.MyPlayer.Status != "Dead" || IdleHandler.IsAfk)
+        if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
         {
             return;
         }
