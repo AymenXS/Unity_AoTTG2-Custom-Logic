@@ -31,6 +31,7 @@ class Main
         {
             Game.SpawnTitans("Default", self.Titans);
             self.UpdateTitanCounter();
+            UI.SetLabelAll("TopRight", ""); # Clear by setting empty string
         }
         self._ahssUnlocker = null;
         self._ahssUnlocked = false;
@@ -73,25 +74,36 @@ class Main
             # Check for unlock threshold
             if (!self._ahssUnlocked && 
                 currentPoints >= self.PointsForAHSS && 
-                !currentData.Get("unlocked"))
-            {
+                !currentData.Get("unlocked")) {
+
                 self._ahssUnlocked = true;
                 self._ahssUnlocker = playerName;
                 currentData.Set("unlocked", true);
-                self.HandleAHSSUnlock(killer);
                 
-                # Clear counters and sync with all clients
+                # Clear all counters
+                if (Network.IsMasterClient)
+                {
+                    UI.SetLabelAll("TopRight", "");
+                    UI.SetLabelAll("TopCenter", "AHSS Unlocked!");  # Optional notification
+                }
+                
+                self.HandleAHSSUnlock(killer);
                 if (Network.IsMasterClient)
                 {
                     Network.SendMessageAll("AHSS_UNLOCK|" + playerName);
                 }
+            } elif (!self._ahssUnlocked) {
+                # Update counter for all players
+                self.UpdateProgressCounter(playerName, currentPoints);
             }
-        }
     }
+}
 
     # Update progress counter for all players
     function UpdateProgressCounter(playerName, currentPoints)
     {
+        if (self._ahssUnlocked) {return;}  # Don't update if already unlocked
+        
         if (Network.IsMasterClient)
         {
             text = playerName + ": " + currentPoints + "/" + self.PointsForAHSS;
@@ -143,10 +155,10 @@ class Main
         character.SetWeapon("AHSS");
         # FORCE 5 ROUND LIMIT (using confirmed Human class fields)
         # -------------------------------------------------------
-        character.CurrentAmmoRound = 5;
-        character.CurrentAmmoLeft = 0;
-        character.MaxAmmoRound = 5;
-        character.MaxAmmoTotal = 5;
+        character.CurrentAmmoRound = 2;
+        character.CurrentAmmoLeft = 3;
+        character.MaxAmmoRound = 2;
+        character.MaxAmmoTotal = 3;
          # -------------------------------------------------------
 
         if (character.IsMine)
@@ -185,7 +197,7 @@ class Main
                 self._ahssUnlocked = true;
                 self._ahssUnlocker = playerName;
                 self.InitPlayerData(playerName).Set("unlocked", true);
-                
+
                 # Handle local player unlock
                 if (Network.MyPlayer != null && Network.MyPlayer.Name == playerName)
                 {
