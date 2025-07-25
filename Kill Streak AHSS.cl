@@ -9,7 +9,7 @@ class Main
     PlayerData = Dict(); # {playerName: {points: int, unlocked: bool}}
     _ahssUnlocker = null;
     _ahssUnlocked = false;
-    _ahssConfirmationEnabled = true; # Toggle for confirmation prompt
+    _ahssConfirmationEnabled = true;
 
     # Initialize player data
     function InitPlayerData(playerName)
@@ -30,7 +30,7 @@ class Main
         if (Network.IsMasterClient)
         {
             Game.SpawnTitans("Default", self.Titans);
-            UI.SetLabelAll("TopCenter", "Titans Left: " + self.Titans);
+            self.UpdateTitanCounter();
         }
         self._ahssUnlocker = null;
         self._ahssUnlocked = false;
@@ -60,10 +60,6 @@ class Main
             # Block points if AHSS was already unlocked by someone else
             if (self._ahssUnlocked && playerName != self._ahssUnlocker)
             {
-                if (killer.IsMine)
-                {
-                    Game.Print("AHSS already unlocked by " + self._ahssUnlocker);
-                }
                 return;
             }
             
@@ -71,11 +67,8 @@ class Main
             currentPoints = currentData.Get("points") + 1;
             currentData.Set("points", currentPoints);
             
-            # Show progress to killer
-            if (killer.IsMine)
-            {
-                Game.Print("Titan Kill! Points: " + currentPoints + "/" + self.PointsForAHSS);
-            }
+            # Update counter for all players
+            self.UpdateProgressCounter(playerName, currentPoints);
             
             # Check for unlock threshold
             if (!self._ahssUnlocked && 
@@ -87,7 +80,7 @@ class Main
                 currentData.Set("unlocked", true);
                 self.HandleAHSSUnlock(killer);
                 
-                # Sync with all clients
+                # Clear counters and sync with all clients
                 if (Network.IsMasterClient)
                 {
                     Network.SendMessageAll("AHSS_UNLOCK|" + playerName);
@@ -96,7 +89,23 @@ class Main
         }
     }
 
-    # AHSS unlock handler (with optional confirmation)
+    # Update progress counter for all players
+    function UpdateProgressCounter(playerName, currentPoints)
+    {
+        if (Network.IsMasterClient)
+        {
+            text = playerName + ": " + currentPoints + "/" + self.PointsForAHSS;
+            UI.SetLabelAll("TopRight", text);
+        }
+    }
+
+    # Update titan counter
+    function UpdateTitanCounter()
+    {
+        UI.SetLabelAll("TopCenter", "Titans Left: " + Game.Titans.Count);
+    }
+
+    # AHSS unlock handler
     function HandleAHSSUnlock(character)
     {
         if (character == null || character.Type != "Human") {return;}
@@ -104,55 +113,52 @@ class Main
 
         if (self._ahssConfirmationEnabled && character.IsMine)
         {
-            # Start confirmation coroutine
             self.AHSSConfirmation(character);
             return;
         }
         
-        # Skip confirmation if disabled
         self.ActivateAHSS(character);
     }
 
     # Coroutine: Waits for player confirmation
     coroutine AHSSConfirmation(character)
     {
-        # Show prompt
         UI.SetLabelForTime("TopRight", "Hold <color=yellow>'Reload'</color> to unlock AHSS", 5);
 
-        # Wait for F key press
         while (!Input.GetKeyHold("Human/Reload"))
         {
-            wait 0.1; # Check every 0.1 seconds
+            wait 0.1;
         }
 
-        # Confirmed - unlock AHSS
         self.ActivateAHSS(character);
     }
 
     # Actual AHSS activation logic
-    function ActivateAHSS(character) {
+    function ActivateAHSS(character)
+    {
         # Verify character is human (safety check)
         if (character.Type != "Human") {return;}
 
-        # Set weapon to AHSS (confirmed in Human class docs)
+        # Set weapon to AHSS
         character.SetWeapon("AHSS");
-
         # FORCE 5 ROUND LIMIT (using confirmed Human class fields)
         # -------------------------------------------------------
-        character.CurrentAmmoRound = 5;    # Loaded rounds (confirmed writable)
-        character.CurrentAmmoLeft = 0;     # No spare ammo (confirmed writable)
-        character.MaxAmmoRound = 5;       # Magazine capacity (confirmed writable)
-        character.MaxAmmoTotal = 5;       # Hard cap total ammo (confirmed writable)
-        # -------------------------------------------------------
+        character.CurrentAmmoRound = 5;
+        character.CurrentAmmoLeft = 0;
+        character.MaxAmmoRound = 5;
+        character.MaxAmmoTotal = 5;
+         # -------------------------------------------------------
 
-        # Visual feedback (using confirmed Game class)
-        if (character.IsMine) {
-            Game.Print("<color=#FFD700>AHSS unlocked (5 rounds max)</color>");
-            character.PlaySound("AHSSGunShotDouble2"); # Confirmed in Character class
+        if (character.IsMine)
+        {
+            character.PlaySound("AHSSGunShotDouble2");
         }
         
-        # Global announcement
-        Game.PrintAll(character.Name + " has unlocked AHSS!");
+        # Single global notification
+        if (Network.IsMasterClient)
+        {
+            Game.PrintAll(character.Name + " has unlocked AHSS!");
+        }
     }
 
     # Network message handling
@@ -217,7 +223,7 @@ class Main
                 Game.End(10.0);
             }
             
-            UI.SetLabelAll("TopCenter", "Titans Left: " + titans);
+            self.UpdateTitanCounter();
         }
     }
 }
