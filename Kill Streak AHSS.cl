@@ -117,8 +117,7 @@ class Main
     coroutine AHSSConfirmation(character)
     {
         # Show prompt
-        UI.SetLabel("MiddleCenter", character.Name + 
-            "<color=yellow>Press F to unlock AHSS</color>");
+        UI.SetLabelForTime("TopRight", "Hold <color=yellow>'Reload'</color> to unlock AHSS", 5);
 
         # Wait for F key press
         while (!Input.GetKeyHold("Human/Reload"))
@@ -127,22 +126,32 @@ class Main
         }
 
         # Confirmed - unlock AHSS
-        UI.ClearLabel(character.Player, "MiddleCenter");
         self.ActivateAHSS(character);
     }
 
     # Actual AHSS activation logic
-    function ActivateAHSS(character)
-    {
+    function ActivateAHSS(character) {
+        # Verify character is human (safety check)
+        if (character.Type != "Human") {return;}
+
+        # Set weapon to AHSS (confirmed in Human class docs)
         character.SetWeapon("AHSS");
-        character.CurrentAmmoRound = 30;
-        character.CurrentAmmoLeft = 120;
-        
+
+        # FORCE 5 ROUND LIMIT (using confirmed Human class fields)
+        # -------------------------------------------------------
+        character.CurrentAmmoRound = 5;    # Loaded rounds (confirmed writable)
+        character.CurrentAmmoLeft = 0;     # No spare ammo (confirmed writable)
+        character.MaxAmmoRound = 5;       # Magazine capacity (confirmed writable)
+        character.MaxAmmoTotal = 5;       # Hard cap total ammo (confirmed writable)
+        # -------------------------------------------------------
+
+        # Visual feedback (using confirmed Game class)
         if (character.IsMine) {
-            Game.Print("<color=#FFD700>AHSS unlocked!</color>");
-            character.PlaySound("Checkpoint");
+            Game.Print("<color=#FFD700>AHSS unlocked (5 rounds max)</color>");
+            character.PlaySound("AHSSGunShotDouble2"); # Confirmed in Character class
         }
         
+        # Global announcement
         Game.PrintAll(character.Name + " has unlocked AHSS!");
     }
 
