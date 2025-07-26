@@ -1233,8 +1233,8 @@ extension TeamSystem {
                     }
                 } elif (Network.IsMasterClient) {
                     ScoreSystem._HumanScore += 1;
-                    AdminCommands.ReviveAllHumans();
-                    AdminCommands.ReviveAllPTs();
+                    CommandSystem.ReviveAllHumans();
+                    CommandSystem.ReviveAllPTs();
                     Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
                 }
             }
