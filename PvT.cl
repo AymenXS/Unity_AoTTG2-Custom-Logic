@@ -79,7 +79,7 @@ class Main {
     KillsToRevive = 7;
 
     # Slow Motion Ending
-    _SlowMode = false;
+    _SlowMode = true;
     SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
 
     /*===== INITIALIZATION =====*/
@@ -394,7 +394,7 @@ class Main {
                 Time.TimeScale = 1.0;
                 Game.Print("Slow motion disabled");
             } else {
-                Time.TimeScale = 0.33;
+                Time.TimeScale = 0.5;
                 Game.Print("Slow motion enabled");
             }
         }
@@ -586,7 +586,7 @@ extension AdminCommands {
             if (cmdword == "slowmo") {
                 if (Network.IsMasterClient || Network.MyPlayer.ID == Main.Moderator) {
                     if (Time.TimeScale == 1.0) {
-                        Time.TimeScale = 0.33;
+                        Time.TimeScale = 0.5;
                         Game.Print("Slow motion enabled");
                         if (Network.IsMasterClient) {
                             Network.SendMessageAll("slowmo");
@@ -675,7 +675,7 @@ extension AdminCommands {
         if (ptcount == 0) {
             # Game.Print("There are no player titans in this room.");
         } else {
-            Game.Print("Revived all PTs.");
+            # Game.Print("Revived all PTs.");
         }
     }
 
@@ -690,7 +690,7 @@ extension AdminCommands {
         if (humanCount == 0) {
             # Game.Print("There are no humans in this room.");
         } else {
-            Game.Print("Revived all Humans!");
+            # Game.Print("Revived all Humans!");
         }
     }
 }
@@ -1117,7 +1117,7 @@ extension TeamSystem {
             );
             
             if (Main._SlowMode) {
-                Time.TimeScale = 0.33; # slowmo ending
+                Time.TimeScale = 0.50; # slowmo ending
                 Game.End(3.33);
             } else {
                 Game.End(10);
@@ -1133,7 +1133,7 @@ extension TeamSystem {
                     );
                     
                     if (Main._SlowMode) {
-                        Time.TimeScale = 0.33;
+                        Time.TimeScale = 0.50;
                         Game.End(3.33);
                     } else {
                         Game.End(10);
@@ -1150,7 +1150,7 @@ extension TeamSystem {
                     );
                     
                     if (Main._SlowMode) {
-                        Time.TimeScale = 0.33;
+                        Time.TimeScale = 0.50;
                         Game.End(3.33);
                     } else {
                         Game.End(5);
