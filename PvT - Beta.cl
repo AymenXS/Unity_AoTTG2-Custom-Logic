@@ -17,6 +17,20 @@
 # - AHSS unlock system with point tracking
 #======================================================================
 class Main {    
+    /*===== SYSTEM TOGGLES =====*/
+    EnableIdleSystem = true;
+    EnableRespawnSystem = true;
+    EnableRockThrowSystem = true;
+    EnableAHSSUnlockSystem = true;
+    EnableKCRevivalSystem = true;
+    EnableDamageSystem = true;
+    EnableTeamSystem = true;
+    EnableScoreSystem = true;
+    EnableMovementSystem = true;
+    EnableNetworkSystem = true;
+    # EnableUISystem = true;
+    # EnableCommandSystem = true;
+    
     /*===== GAME CONFIGURATION =====*/
    # Team Settings
 	ShowTeamScore = true;
@@ -70,7 +84,6 @@ class Main {
     _debugPopupCreated = false;
 
     # Idle mode settings
-    IdleMode = true;
     IdleKillTime = 60;
     IdleKillTimeTooltip = "Time in seconds before a player is considered Idle and is killed.";
     IdleRespawn = true;
@@ -85,41 +98,51 @@ class Main {
 
     /*===== INITIALIZATION =====*/
     function Init() {
-        # Initialize Idle System
-        IdleSystem.AfkOn = self.IdleMode;
-        IdleSystem.AfkKillTime = self.IdleKillTime;
-        IdleSystem.IdleRespawn = self.IdleRespawn;
-        # Initialize Respawn System
-        RespawnSystem.BaseRespawnTime = self.BaseRespawnTime;
-        RespawnSystem.MinRespawnTime = self.MinRespawnTime;
-        RespawnSystem.RespawnHumanScale = self.RespawnHumanScale;
-        RespawnSystem.RespawnTitanScale = self.RespawnTitanScale;
-        RespawnSystem.respawn_timers = new Dict();
-        RespawnSystem.respawn_timer_keys = new List();
+        # Initialize systems only if they're enabled
+        if (Main.EnableIdleSystem) {
+            IdleSystem.AfkKillTime = self.IdleKillTime;
+            IdleSystem.IdleRespawn = self.IdleRespawn;
+        }
         
-        # Initialize Score System
-        ScoreSystem._HumanScore = RoomData.GetProperty("human_wins", 0);
-        ScoreSystem._TitanScore = RoomData.GetProperty("titan_wins", 0);
-         # Initialize Team System
-        TeamSystem.FullClear = self.FullClear;
+        if (Main.EnableRespawnSystem) {
+            RespawnSystem.BaseRespawnTime = self.BaseRespawnTime;
+            RespawnSystem.MinRespawnTime = self.MinRespawnTime;
+            RespawnSystem.RespawnHumanScale = self.RespawnHumanScale;
+            RespawnSystem.RespawnTitanScale = self.RespawnTitanScale;
+            RespawnSystem.respawn_timers = new Dict();
+            RespawnSystem.respawn_timer_keys = new List();
+        }
         
-        # Initialize Rock Throwers
-        self.rockthrowers = String.Split(self.AuthorizedRockThrower, "-");
-        AHSSUnlockSystem.Initialize();
-        KCRevival.Init();
-        RockThrowSystem.Init();
+        if (Main.EnableScoreSystem) {
+            ScoreSystem._HumanScore = RoomData.GetProperty("human_wins", 0);
+            ScoreSystem._TitanScore = RoomData.GetProperty("titan_wins", 0);
+        }
         
-        # Configure UI
+        if (Main.EnableTeamSystem) {
+            TeamSystem.FullClear = self.FullClear;
+        }
+        
+        if (Main.EnableRockThrowSystem) {
+            self.rockthrowers = String.Split(self.AuthorizedRockThrower, "-");
+            RockThrowSystem.Init();
+        }
+        
+        if (Main.EnableAHSSUnlockSystem) {
+            AHSSUnlockSystem.Initialize();
+        }
+        
+        if (Main.EnableKCRevivalSystem) {
+            KCRevival.Init();
+        }
+        
+        # Always configure UI basics
         UI.SetLabel("MiddleCenter", "");
         Game.DefaultShowKillFeed = false;
         Game.DefaultShowKillScore = false;
         Game.DefaultAddKillScore = false;
-
-         # Configure scoreboard
         UI.SetScoreboardProperty("KDRA");
         UI.SetScoreboardHeader("Kills / Deaths / Max / Total");
         
-        # Show tutorial if needed
         if (!RoomData.GetProperty("tutorial_shown", false)) {
             Cutscene.Start("PvTQuickStart", true);
             RoomData.SetProperty("tutorial_shown", true);
@@ -137,34 +160,34 @@ class Main {
     }
     
     function OnFrame() {
-        MovementSystem.TrackMovement();
-        IdleSystem.OnFrame();
+        if (Main.EnableMovementSystem) {MovementSystem.TrackMovement();}
+        if (Main.EnableIdleSystem) {IdleSystem.OnFrame();}
     }
 
     function OnSecond() {
-        KCRevival.OnSecond();
-        IdleSystem.OnSecond();
-        RespawnSystem.OnSecond();
-        RockThrowSystem.OnSecond();
+        if (Main.EnableKCRevivalSystem) {KCRevival.OnSecond();}
+        if (Main.EnableIdleSystem) {IdleSystem.OnSecond();}
+        if (Main.EnableRespawnSystem) {RespawnSystem.OnSecond();}
+        if (Main.EnableRockThrowSystem) {RockThrowSystem.OnSecond();}
     }
 
     function OnCharacterSpawn(character) {
-        TeamSystem.UpdateTeamUI();
-        RockThrowSystem.HandleSpawn(character);
+        if (Main.EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
+        if (Main.EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character);}
     }
 
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
-        DamageSystem.HandleDamage(victim, killer, killerName, damage);
-        TeamSystem.CheckVictoryConditions();
+        if (Main.EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage);}
+        if (Main.EnableTeamSystem) {TeamSystem.CheckVictoryConditions();}
     }
 
     function OnCharacterDie(victim, killer, killerName) {
-        AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);
-        DeathSystem.HandleDeath(victim, killer, killerName);
-    }
+        if (Main.EnableAHSSUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);}
+        if (Main.EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName);}
+    }   
 
     function OnNetworkMessage(sender, message) {
-        NetworkSystem.HandleMessage(sender, message);
+        if (Main.EnableNetworkSystem) {NetworkSystem.HandleMessage(sender, message);}
     }
 
     function OnChatInput(message) {
@@ -184,6 +207,8 @@ extension MovementSystem {
     lastMagnitudes = new Dict();
 
     function TrackMovement() {
+        if (!Main.EnableMovementSystem) {return;}
+
         for (human in Game.PlayerHumans) {
             if (human != null && human.Player != null) {
                 mag = human.Velocity.Magnitude;
@@ -197,6 +222,8 @@ extension MovementSystem {
 
 extension DamageSystem {
     function HandleDamage(victim, killer, killerName, damage) {
+        if (!Main.EnableDamageSystem) {return;}
+
         # Basic validation
         if (victim == null || victim.Health > 0 || victim.Player == null) {
             return;
@@ -303,6 +330,8 @@ extension DeathSystem {
 
 extension NetworkSystem {
     function HandleMessage(sender, message) {
+        if (!Main.EnableNetworkSystem) {return;}
+        
         if (message == "AHSS_LOCKED") {
             AHSSUnlockSystem._ahssUnlocked = true;
         }
@@ -354,6 +383,7 @@ extension NetworkSystem {
 }
 
 extension UISystem {
+    
     _rulesPopupCreated = false;
     _debugPopupCreated = false;
 
@@ -445,6 +475,8 @@ extension RockThrowSystem {
     }
     
     function OnSecond() {
+        if (!Main.EnableRockThrowSystem) {return;}
+
         if (Network.MyPlayer != null && 
             Network.MyPlayer.Character != null && 
             Network.MyPlayer.Character.Type == "Titan" && 
@@ -456,6 +488,8 @@ extension RockThrowSystem {
     }
     
     function HandleSpawn(character) {
+        if (!Main.EnableRockThrowSystem) {return;}
+
         if (character.Type == "Titan" && !character.IsAI) {
             playerID = Convert.ToString(character.Player.ID);
             
@@ -597,7 +631,7 @@ extension CommandSystem {
             if (!Network.IsMasterClient) {
                 Game.Print("<color='#CC0000'>Error: You are not the MasterClient!</color>");
             } elif (cmdword == "debug") {
-                UI.ShowPopup("DebugPopup");
+                UISystem.ShowDebugPopup();
                 return false;
             }
 
@@ -671,8 +705,7 @@ extension CommandSystem {
     }
 }
 
-extension AHSSUnlockSystem
-{
+extension AHSSUnlockSystem {
     # Configuration - adjust these values as needed
     PointsForAHSS = 15;
     AITitanPointValue = 1;
@@ -693,8 +726,8 @@ extension AHSSUnlockSystem
     }
     
     # Core functionality
-    function ProcessTitanKill(victim, killer, killerName)
-    {
+    function ProcessTitanKill(victim, killer, killerName) {
+        if (!Main.EnableAHSSUnlockSystem) {return false;}
         if (victim == null || killer == null || killer.Type != "Human") {return false;}
         
         playerName = killer.Name;
@@ -704,16 +737,14 @@ extension AHSSUnlockSystem
         if (self._ahssUnlocked && playerName != self._ahssUnlocker) {return false;}
         
         # Calculate points
-         if (victim.IsAI)
-    {
-        pointsToAdd = self.AITitanPointValue;
-    }
-    else
-    {
-        pointsToAdd = self.PlayerTitanPointValue;
-    }
-        newPoints = currentData.Get("points") + pointsToAdd;
-        currentData.Set("points", newPoints);
+        if (victim.IsAI) {
+            pointsToAdd = self.AITitanPointValue;
+        }
+        else {
+             pointsToAdd = self.PlayerTitanPointValue;
+        }
+            newPoints = currentData.Get("points") + pointsToAdd;
+            currentData.Set("points", newPoints);
         
         # Check for unlock
         if (!self._ahssUnlocked && newPoints >= self.PointsForAHSS && !currentData.Get("unlocked"))
@@ -803,7 +834,6 @@ extension AHSSUnlockSystem
 }
 
 extension IdleSystem {
-    AfkOn = true;
     AfkKillTime = 60;
     IsAfk = false;
     IdleRespawn = false;
@@ -812,12 +842,9 @@ extension IdleSystem {
     _AfkTimer = 60;
     _lastPosition = Vector3(0,0,0);
 
-    function OnFrame()
-    {
-        if (!self.AfkOn)
-        {
-            return;
-        }
+    function OnFrame() {
+        if (!Main.EnableIdleSystem) {return;}
+
         if (self.IsAfk && Input.GetKeyDown("General/Forward"))
         {
             self.IsAfk = false;
@@ -834,12 +861,9 @@ extension IdleSystem {
         Network.MyPlayer.SetCustomProperty(self.IdleProp, self.IsAfk);
     }
 
-    function OnSecond()
-    {
-        if (!self.AfkOn)
-        {
-            return;
-        }
+    function OnSecond(){
+        if (!Main.EnableIdleSystem) {return;}
+
         if (self.IsAfk && Network.MyPlayer.Status != "Spectate")
         {
             if (self.IdleRespawn)
@@ -891,6 +915,7 @@ extension KCRevival {
     }
 
     function OnDeath() {
+        if (!Main.EnableKCRevivalSystem) {return;}
         self.ShowRevivalCount();
     }
 
@@ -907,6 +932,7 @@ extension KCRevival {
     }
 
     function OnSecond() {
+        if (!Main.EnableKCRevivalSystem) {return;}
         if (Network.MyPlayer.Status == "Spectating")
         {
             UI.SetLabel("BottomCenter", String.Newline + String.Newline + String.Newline + 
@@ -954,6 +980,8 @@ extension RespawnSystem {
     respawn_timer_keys = new List();
 
     function OnSecond() {
+        if (!Main.EnableRespawnSystem) {return;}
+
         # Initialize/reset if needed
         if (self.respawn_timers == null) {
             self.respawn_timers = new Dict();
@@ -1046,6 +1074,8 @@ extension RespawnSystem {
     }
 
     function QueueRespawn(victim) {
+        if (!Main.EnableRespawnSystem) {return;}
+
         # Determine team prefix (H- for human, T- for titan)
         teamPrefix = "T-";
         if (victim.Type == "Human") {
@@ -1079,12 +1109,12 @@ extension RespawnSystem {
     }
 }
 
-
 extension ScoreSystem {
     _HumanScore = 0;
     _TitanScore = 0;
     
     function UpdateScore(x, iskiller, damage, restarting) {
+        if (!Main.EnableScoreSystem) {return;}
         # Only update stats if not during game restart
         if (restarting == false) {
             if (iskiller) {
@@ -1180,6 +1210,7 @@ extension ScoreSystem {
 
 extension TeamSystem {
     function UpdateTeamUI() {
+        if (!Main.EnableTeamSystem) {return;}
         TeamScore = "";
         if (Main.ShowTeamScore) {
             TeamScore = String.Newline + "<size=20><color='#5F8DE7'>" + Main.TeamOneName + ": " + ScoreSystem._HumanScore + "</color> | " + "<color='#FFE14C'>" + Main.TeamTwoName + ": " + ScoreSystem._TitanScore + "</color></size>";
@@ -1214,6 +1245,7 @@ extension TeamSystem {
     }
     
     function CheckVictoryConditions() {
+        if (!Main.EnableTeamSystem) {return;}
         # Case 1: All humans dead - Titans win
         if (Game.PlayerHumans.Count == 0) {
             # Titans win condition
