@@ -120,6 +120,8 @@ class Main {
         }
         
         if (Main.EnableRockThrowSystem) {
+            Input.SetKeyDefaultEnabled("Titan/AttackRockThrow", true);
+            Input.GetKeyDown("Titan/AttackRockThrow", RockThrowSystem.OnRockThrow());
             self.rockthrowers = String.Split(self.AuthorizedRockThrower, "-");
             RockThrowSystem.Init();
         }
@@ -499,6 +501,39 @@ extension RockThrowSystem {
             if (self.rockthrowers.Contains(playerID)) {
                 character.AddOutline(Color("#FF0000"), "OutlineVisible");
             }
+        }
+    }
+
+    function OnRockThrow() {
+        if (Network.MyPlayer != null && 
+            Network.MyPlayer.Character != null && 
+            Network.MyPlayer.Character.Type == "Titan") {
+            
+            # Get current position and rotation
+            pos = Network.MyPlayer.Character.Position;
+            rot = Network.MyPlayer.Character.Rotation;
+            
+            # Calculate throw direction and velocity
+            fwd = Vector3(0, 0, 1).Rotate(rot);
+            vel = fwd * 50;
+            
+            # Spawn rock with owner reference
+            rock = Game.SpawnProjectileWithOwner(
+                "Rock1",
+                pos + Vector3(0, 2, 0),
+                rot,
+                vel,
+                Vector3(0, -9.81, 0),
+                10.0,
+                Network.MyPlayer.Character, # Owner reference
+                1.0
+            );
+            
+            # Store owner ID in two ways for reliability
+            rock.SetCustomProperty("ThrowerID", Network.MyPlayer.ID);
+            rock.Owner = Network.MyPlayer.Character; # Direct owner assignment
+            
+            Game.Print("[ROCK THROWN] By: " + Network.MyPlayer.Name + " (ID:" + Network.MyPlayer.ID + ")");
         }
     }
 }
