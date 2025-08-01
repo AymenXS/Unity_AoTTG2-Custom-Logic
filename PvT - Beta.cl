@@ -315,7 +315,7 @@ extension DamageSystem {
         }
         
         if (killer.Name == Network.MyPlayer.Name) {
-            ScoreSystem.UpdateScore(killer.Player, true, Convert.ToFloat(damage), false);
+            ScoreSystem.UpdateScore(killer.Player, true, Convert.ToInt(damage), false);
         }
     }
 
