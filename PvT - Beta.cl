@@ -76,9 +76,6 @@ class Main {
     ManualTitanTimer = 0;          # Manual titan respawn time
     ManualTitanTimerTooltip = "Override human dynamic respawn time in seconds.";
 
-    # Greeting Feature
-    _GreetingsFontSize = 20;  # Font size for special player greeting messages.
-
     # UI State
     _rulesPopupCreated = false;
     _debugPopupCreated = false;
@@ -142,6 +139,12 @@ class Main {
         Game.DefaultAddKillScore = false;
         UI.SetScoreboardProperty("KDRA");
         UI.SetScoreboardHeader("Kills / Deaths / Max / Total");
+
+        player = Network.MyPlayer;
+        player.SetCustomProperty("KDRA", 
+            player.Kills + " / " + player.Deaths + 
+            " / " + player.HighestDamage + " / " + player.TotalDamage
+        );
 
         
         
