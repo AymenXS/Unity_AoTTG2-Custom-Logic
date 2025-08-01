@@ -135,6 +135,7 @@ class Main {
     function OnTick() {
         # Empty or custom tick logic
     }
+    
     function OnFrame() {
         MovementSystem.TrackMovement();
         IdleSystem.OnFrame();
@@ -353,53 +354,86 @@ extension NetworkSystem {
 }
 
 extension UISystem {
-    rulesPopupCreated = false;
-    debugPopupCreated = false;
+    _rulesPopupCreated = false;
+    _debugPopupCreated = false;
 
     function HandleButtonClick(buttonName) {
-        if (buttonName == "CloseRules" || buttonName == "CloseDebug") {
+        if (buttonName == "CloseRules") {
             UI.HidePopup("RulesPopup");
+        }
+        elif (buttonName == "CloseDebug") {
+            UI.HidePopup("DebugPopup");
         }
     }
 
     function CreateRulesPopup() {
         if (self._rulesPopupCreated) {return;}
         
+        # 1. Create popup container (same dimensions)
         UI.CreatePopup("RulesPopup", "Original Gamemode PvT - GUIDELINES", 900, 700);
         
-        # Add content sections
-        self.AddRulesSection("WEAPON RESTRICTIONS", 
-            "NO APG/AHSS/TS weapons allowed (OP Against PTs)\n" +
+        # 2. Header (identical to original)
+        UI.AddPopupLabel("RulesPopup", 
+            "<color=#AAAAAA>These guidelines help maintain balanced gameplay. " +
+            String.Newline +
+            "Host may adjust rules to ensure everyone is having fun!</color>" + 
+            String.Newline + String.Newline +
+            "<size=24><color=#FF5555>WEAPON RESTRICTIONS</color></size>");
+        
+        # 3. Weapon rules (original formatting)
+        UI.AddPopupLabel("RulesPopup", 
+            "<color=#FF9999>NO APG/AHSS/TS weapons allowed (OP Against PTs)</color>" + 
+            String.Newline + 
             "  <size=16><i>(Will be enabled in future updates)</i></size>");
-            
-        self.AddRulesSection("RESPAWN", 
-            "Base respawn: <color=#FFFF00>60 seconds</color>\n" +
+        
+        # 4. Respawn rules (original colors)
+        UI.AddPopupLabel("RulesPopup", 
+            String.Newline + "<size=24><color=#55FF55>RESPAWN</color></size>" +
+            String.Newline +
+            "Base respawn: <color=#FFFF00>60 seconds</color>" +
+            String.Newline +
             "Adjusted down to <color=#FFFF00>30s minimum</color> for disadvantaged teams");
-            
-        self.AddRulesSection("TITAN ABILITIES", 
-            "<color=#FFCC00>Rock throw limited to 2 PTs max</color>\n" +
-            "Throwers chosen randomly each round\n" +
+
+        # 5. Titan abilities (original styling)
+        UI.AddPopupLabel("RulesPopup", 
+            String.Newline + "<size=24><color=#FFAA00>TITAN ABILITIES</color></size>" +
+            String.Newline +
+            "<color=#FFCC00>Rock throw limited to 2 PTs max</color>" +
+            String.Newline +
+            "Throwers chosen randomly each round" +
+            String.Newline +
             "<size=16><i>(Host may occasionally allow 3PT)</i></size>");
         
+        # 6. Close button (identical implementation)
         UI.AddPopupBottomButton("RulesPopup", "CloseRules", 
             UI.WrapStyleTag("UNDERSTOOD", "color", "#FFFFFF"));
         
         self._rulesPopupCreated = true;
     }
 
-    function AddRulesSection(title, content) {
-        UI.AddPopupLabel("RulesPopup", 
-            String.Newline + "<size=24><color=#" + self.GetTitleColor(title) + ">" + title + "</color></size>\n" +
-            content);
+    function CreateDebugPopup() {
+        if (self._debugPopupCreated) {return;}
+        
+        UI.CreatePopup("DebugPopup", "Original Gamemode PvT - GUIDELINES", 900, 700);
+        UI.AddPopupLabel("DebugPopup", Game.Loadouts + " - Debug Mode");
+        UI.AddPopupBottomButton("DebugPopup", "CloseDebug", 
+            UI.WrapStyleTag("UNDERSTOOD", "color", "#FFFFFF"));
+        
+        self._debugPopupCreated = true;
     }
 
-    function GetTitleColor(title) {
-        colors = {
-            "WEAPON RESTRICTIONS": "FF5555",
-            "RESPAWN": "55FF55", 
-            "TITAN ABILITIES": "FFAA00"
-        };
-        return colors.Get(title, "FFFFFF");
+    function ShowRulesPopup() {
+        if (!self._rulesPopupCreated) {
+            self.CreateRulesPopup();
+        }
+        UI.ShowPopup("RulesPopup");
+    }
+
+    function ShowDebugPopup() {
+        if (!self._debugPopupCreated) {
+            self.CreateDebugPopup();
+        }
+        UI.ShowPopup("DebugPopup");
     }
 }
 
@@ -592,7 +626,7 @@ extension CommandSystem {
 
             # Show rule popup
             if (cmdword == "rules") {
-                UI.ShowPopup("RulesPopup");
+                UISystem.ShowRulesPopup();  # ← Use this instead of direct UI.ShowPopup()
                 return false;
             }
 
