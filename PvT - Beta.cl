@@ -256,8 +256,6 @@ extension DamageSystem {
     }
 
     function HandleHumanKiller(victim, killer, killerName, damage) {
-        Game.Print("Titan killed by " + killerName + " with " + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
-
         Game.ShowKillFeed(
             TeamSystem.TeamHeader(killer),
             TeamSystem.TeamHeader(victim),
@@ -278,8 +276,6 @@ extension DamageSystem {
     }
 
     function HandleTitanKiller(victim, killer, killerName, damage) {
-         Game.Print("Human killed by " + killerName + " with " + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
-
         if (victim.Name == Network.MyPlayer.Name) {
             # Calculate velocity-based damage
             damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
@@ -302,7 +298,6 @@ extension DamageSystem {
 
     function HandleRockKill(victim, killer, killerName, damage) {
         if (victim.Name == Network.MyPlayer.Name) {
-            Game.Print("Human killed by " + killerName + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
             # Calculate velocity-based damage
             damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
             
