@@ -284,7 +284,7 @@ extension DamageSystem {
             TeamSystem.TeamHeader(killer),
             TeamSystem.TeamHeader(victim),
             damage,
-            "Blade"
+            "Blade",
         );
         
         # Update killer's score if local player
@@ -311,13 +311,12 @@ extension DamageSystem {
                 damage,
                 "Titan"
             );
-            ScoreSystem.UpdateScore(killer.Player, true, Convert.ToInt(damage), false);
             ScoreSystem.UpdateScore(victim.Player, false, 0, false);
         }
         
-        # if (killer.Name == Network.MyPlayer.Name) {
-        #     ScoreSystem.UpdateScore(killer.Player, true, damage, false);
-        # }
+        if (killer.Name == Network.MyPlayer.Name) {
+            ScoreSystem.UpdateScore(killer.Player, true, Convert.ToFloat(damage), false);
+        }
     }
 
     function HandleRockKill(victim, killer, killerName, damage) {
