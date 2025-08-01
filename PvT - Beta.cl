@@ -120,6 +120,8 @@ class Main {
         }
         
         if (Main.EnableRockThrowSystem) {
+            Input.SetKeyDefaultEnabled("Titan/AttackRockThrow", true);
+            Input.GetKeyDown("Titan/AttackRockThrow", RockThrowSystem.OnRockThrow());
             self.rockthrowers = String.Split(self.AuthorizedRockThrower, "-");
             RockThrowSystem.Init();
         }
@@ -256,8 +258,6 @@ extension DamageSystem {
     }
 
     function HandleHumanKiller(victim, killer, killerName, damage) {
-        Game.Print("Titan killed by " + killerName + " with " + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
-
         Game.ShowKillFeed(
             TeamSystem.TeamHeader(killer),
             TeamSystem.TeamHeader(victim),
@@ -278,8 +278,6 @@ extension DamageSystem {
     }
 
     function HandleTitanKiller(victim, killer, killerName, damage) {
-         Game.Print("Human killed by " + killerName + " with " + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
-
         if (victim.Name == Network.MyPlayer.Name) {
             # Calculate velocity-based damage
             damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
@@ -301,19 +299,51 @@ extension DamageSystem {
     }
 
     function HandleRockKill(victim, killer, killerName, damage) {
-        if (victim.Name == Network.MyPlayer.Name) {
-            Game.Print("Human killed by " + killerName + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
-            # Calculate velocity-based damage
-            damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
-            
-            Game.ShowKillFeedAll(
-                "<b><color='#ff0000'>ROCK</color></b>",
-                TeamSystem.TeamHeader(victim),
-                damage,
-                "Titan"
-            );
-            ScoreSystem.UpdateScore(victim.Player, false, 0, false);
+        # Try to get thrower from multiple possible sources
+        thrower = null;
+        
+        # Method 1: Check if killer has Owner property
+        if (killer != null && killer.Owner != null && killer.Owner.Player != null) {
+            thrower = killer.Owner.Player;
         }
+        # Method 2: Check custom property
+        elif (killer != null) {
+            throwerID = killer.GetCustomProperty("ThrowerID");
+            if (throwerID != null) {
+                for (player in Network.Players) {
+                    if (player.ID == throwerID) {
+                        thrower = player;
+                        break;
+                    }
+                }
+            }
+        }
+
+        # Calculate damage
+        damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
+        
+        # Determine kill feed display
+        if (thrower != null) {
+            killerDisplay = TeamSystem.TeamHeader(thrower.Character);
+            Game.Print("[ROCK KILL] Credited to: " + thrower.Name + " (ID:" + thrower.ID + ")");
+        } else {
+            killerDisplay = "Rock";
+            Game.Print("[ROCK WARN] No valid thrower found - killer: " + (killer != null ? killer.ToString() : "null"));
+        }
+
+        # Show kill feed
+        Game.ShowKillFeedAll(
+            killerDisplay,
+            TeamSystem.TeamHeader(victim),
+            damage,
+            "Titan"
+        );
+        
+        # Update scores if valid thrower found
+        if (thrower != null) {
+            ScoreSystem.UpdateScore(thrower, true, Convert.ToInt(damage), false);
+        }
+        ScoreSystem.UpdateScore(victim.Player, false, 0, false);
     }
 }
 
@@ -504,6 +534,39 @@ extension RockThrowSystem {
             if (self.rockthrowers.Contains(playerID)) {
                 character.AddOutline(Color("#FF0000"), "OutlineVisible");
             }
+        }
+    }
+
+    function OnRockThrow() {
+        if (Network.MyPlayer != null && 
+            Network.MyPlayer.Character != null && 
+            Network.MyPlayer.Character.Type == "Titan") {
+            
+            # Get current position and rotation
+            pos = Network.MyPlayer.Character.Position;
+            rot = Network.MyPlayer.Character.Rotation;
+            
+            # Calculate throw direction and velocity
+            fwd = Vector3(0, 0, 1).Rotate(rot);
+            vel = fwd * 50;
+            
+            # Spawn rock with owner reference
+            rock = Game.SpawnProjectileWithOwner(
+                "Rock1",
+                pos + Vector3(0, 2, 0),
+                rot,
+                vel,
+                Vector3(0, -9.81, 0),
+                10.0,
+                Network.MyPlayer.Character, # Owner reference
+                1.0
+            );
+            
+            # Store owner ID in two ways for reliability
+            rock.SetCustomProperty("ThrowerID", Network.MyPlayer.ID);
+            rock.Owner = Network.MyPlayer.Character; # Direct owner assignment
+            
+            Game.Print("[ROCK THROWN] By: " + Network.MyPlayer.Name + " (ID:" + Network.MyPlayer.ID + ")");
         }
     }
 }
