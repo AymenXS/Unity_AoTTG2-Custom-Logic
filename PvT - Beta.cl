@@ -144,9 +144,9 @@ class Main {
             TitanJumpCooldown.Init();
         }
 
-        TitanStats.AttackSpeedMultiplier = Main.TitanAttackSpeed;
-        TitanStats.MaxStamina = Main.TitanMaxStamina;
-        TitanStats.AttackWait = Main.TitanAttackWait;
+        PlayerTitanStats.AttackSpeedMultiplier = Main.TitanAttackSpeed;
+        PlayerTitanStats.MaxStamina = Main.TitanMaxStamina;
+        PlayerTitanStats.AttackWait = Main.TitanAttackWait;
         
         # Always configure UI basics
         UI.SetLabel("MiddleCenter", "");
@@ -185,7 +185,7 @@ class Main {
         if (Main.EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnFrame();
         }
-        TitanStats.OnFrame();
+        PlayerTitanStats.OnFrame();
     }
 
     function OnSecond() {
@@ -201,7 +201,7 @@ class Main {
     function OnCharacterSpawn(character) {
         if (Main.EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
         if (Main.EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character);}
-        TitanStats.OnCharacterSpawn(character);
+        PlayerTitanStats.OnCharacterSpawn(character);
     }
 
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
@@ -1017,6 +1017,7 @@ extension RespawnSystem {
         }
 
         if (self.respawn_timer_keys == null || self.respawn_timer_keys.Count == 0) {
+            self.UpdateRespawnUI(); # Still update UI even if no timers
             return;
         }
 
@@ -1049,7 +1050,6 @@ extension RespawnSystem {
                 
                 if (targetPlayer != null) {
                     Game.SpawnPlayer(targetPlayer, false);
-                    # Game.Print("Respawned " + targetPlayer.Name); FOR DEBUGGING
                 }
                 keys_to_remove.Add(key);
             }
@@ -1060,6 +1060,9 @@ extension RespawnSystem {
             self.respawn_timer_keys.Remove(key);
             self.respawn_timers.Remove(key);
         }
+        
+        # Update UI for all players
+        self.UpdateRespawnUI();
     }
 
     function GetHumanRespawnDelay() {
@@ -1133,6 +1136,52 @@ extension RespawnSystem {
             if (!self.respawn_timer_keys.Contains(storeKey)) {
                 self.respawn_timer_keys.Add(storeKey);
             }
+        }
+    }
+
+    function UpdateRespawnUI() {
+        if (!Main.EnableRespawnSystem) {return;}
+        
+        # Get local player's status
+        localPlayer = Network.MyPlayer;
+        if (localPlayer == null || localPlayer.Status != "Dead") {
+            UI.SetLabel("BottomCenter", ""); # Clear if not dead
+            return;
+        }
+        
+        # Determine team prefix based on character type
+        teamPrefix = "T-"; # Default to Titan
+        if (localPlayer.CharacterType == "Human") {
+            teamPrefix = "H-";
+        }
+        
+        storeKey = teamPrefix + Convert.ToString(localPlayer.ID);
+        
+        # Safely check if key exists
+        if (self.respawn_timers != null && self.respawn_timers.Contains(storeKey)) {
+            timeLeft = Convert.ToInt(self.respawn_timers.Get(storeKey));
+            
+            # Format the display message
+            message = "<size=24><color=#FF5555>RESPAWN IN: ";
+            message += Convert.ToString(timeLeft) + " SECONDS</color></size>";
+            
+            # Show different messages based on team
+            if (localPlayer.CharacterType == "Human") {
+                message += String.Newline + "<size=18><color=#AAAAAA>Human respawn scaling: ";
+                message += Convert.ToString(self.RespawnHumanScale) + "x</color></size>";
+            } else {
+                message += String.Newline + "<size=18><color=#AAAAAA>Titan respawn scaling: ";
+                message += Convert.ToString(self.RespawnTitanScale) + "x</color></size>";
+            }
+            
+            UI.SetLabel("BottomCenter", message);
+        } else {
+            UI.SetLabel("BottomCenter", 
+                "<size=24><color=#FFFF00>WAITING TO RESPAWN...</color></size>" +
+                String.Newline +
+                "<size=18><color=#AAAAAA>Base respawn time: " + 
+                Convert.ToInt(self.BaseRespawnTime) + "s</color></size>"
+            );
         }
     }
 }
@@ -1396,16 +1445,21 @@ extension TitanJumpCooldown {
     }
 }
 
-extension TitanStats {
-    # Default values
+extension PlayerTitanStats {
+    function ApplyStats(character) {
+        # Only apply if: 
+        # 1. Is a Titan
+        # 2. Is a PLAYER (not AI)
+
     AttackSpeedMultiplier = Main.TitanAttackSpeed;
     MaxStamina = Main.TitanMaxStamina;
     AttackWait = Main.TitanAttackWait;
-
-    function ApplyStats(character) {
-        if (character != null && character.Type == "Titan") {
+        if (character != null && 
+            character.Type == "Titan" && 
+            !character.IsAI) 
+        {
             character.AttackSpeedMultiplier = self.AttackSpeedMultiplier;
-            character.MaxStamina = self.MaxStamina;
+            character.MaxStamina = self.MaxStamina; 
             character.AttackWait = self.AttackWait;
         }
     }
@@ -1415,8 +1469,13 @@ extension TitanStats {
     }
 
     function OnFrame() {
-        # Reapply in case values get reset
-        self.ApplyStats(Network.MyPlayer.Character);
+        # Only apply to local player's titan
+        if (Network.MyPlayer != null && 
+            Network.MyPlayer.Character != null &&
+            Network.MyPlayer.Character.Type == "Titan")
+        {
+            self.ApplyStats(Network.MyPlayer.Character);
+        }
     }
 }
 
