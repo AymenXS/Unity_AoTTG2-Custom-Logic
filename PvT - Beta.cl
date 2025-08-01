@@ -15,6 +15,7 @@
 # - Slow motion ending
 # - Kill to Revive system
 # - AHSS unlock system with point tracking
+# - Titan's Stats modification (Inspired by Hao's CL)
 #======================================================================
 class Main {    
     /*===== SYSTEM TOGGLES =====*/
