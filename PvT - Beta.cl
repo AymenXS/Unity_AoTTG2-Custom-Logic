@@ -28,6 +28,7 @@ class Main {
     EnableScoreSystem = true;
     EnableMovementSystem = true;
     EnableNetworkSystem = true;
+    EnableTitanJumpCooldown = true;
     # EnableUISystem = true;
     # EnableCommandSystem = true;
     
@@ -93,6 +94,13 @@ class Main {
     _SlowMode = false;
     SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
 
+    # Default values - change these to adjust titan behavior
+    TitanAttackSpeed = 1.0;
+    TitanMaxStamina = 3; 
+    TitanAttackWait = 0.1;
+    JumpCD = 4.0;  # Cooldown in seconds
+
+
     /*===== INITIALIZATION =====*/
     function Init() {
         # Initialize systems only if they're enabled
@@ -131,6 +139,14 @@ class Main {
         if (Main.EnableKCRevivalSystem) {
             KCRevival.Init();
         }
+
+        if (Main.EnableTitanJumpCooldown) {
+            TitanJumpCooldown.Init();
+        }
+
+        TitanStats.AttackSpeedMultiplier = Main.TitanAttackSpeed;
+        TitanStats.MaxStamina = Main.TitanMaxStamina;
+        TitanStats.AttackWait = Main.TitanAttackWait;
         
         # Always configure UI basics
         UI.SetLabel("MiddleCenter", "");
@@ -159,7 +175,6 @@ class Main {
     }
 
     /*===== EVENT HANDLERS =====*/
-
     function OnTick() {
         # Empty or custom tick logic
     }
@@ -167,6 +182,10 @@ class Main {
     function OnFrame() {
         if (Main.EnableMovementSystem) {MovementSystem.TrackMovement();}
         if (Main.EnableIdleSystem) {IdleSystem.OnFrame();}
+        if (Main.EnableTitanJumpCooldown) {
+            TitanJumpCooldown.OnFrame();
+        }
+        TitanStats.OnFrame();
     }
 
     function OnSecond() {
@@ -174,11 +193,15 @@ class Main {
         if (Main.EnableIdleSystem) {IdleSystem.OnSecond();}
         if (Main.EnableRespawnSystem) {RespawnSystem.OnSecond();}
         if (Main.EnableRockThrowSystem) {RockThrowSystem.OnSecond();}
+        if (Main.EnableTitanJumpCooldown) {
+            TitanJumpCooldown.OnSecond();
+        }
     }
 
     function OnCharacterSpawn(character) {
         if (Main.EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
         if (Main.EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character);}
+        TitanStats.OnCharacterSpawn(character);
     }
 
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
@@ -1310,6 +1333,90 @@ extension TeamSystem {
                 }
             }
         }
+    }
+}
+
+extension TitanJumpCooldown {
+    _jumpKeyEnabled = true;
+    _jumpRoundTime = 0;
+    _action = List();
+    
+    function Init() {
+        # Initialize jump cooldown from Main config
+        self._jumpKeyEnabled = true;
+        self._jumpRoundTime = 0;
+        self._action = List();
+    }
+    
+    function OnFrame() {
+        if (!Main.EnableTitanJumpCooldown) { return; }
+        
+        character = Network.MyPlayer.Character;
+        if (character != null && character.Type == "Titan") {
+            # Detect jump animation start
+            if (self._jumpKeyEnabled && 
+                character.CurrentAnimation == "Amarture_VER2|attack.jumper.0") {
+                self._action.Add(character.CurrentAnimation);
+                self._jumpKeyEnabled = false;
+                self.DelayJump(Main.JumpCD);
+            }
+            
+            # Handle post-jump actions
+            if (!self._jumpKeyEnabled && self._action.Count != 0) {
+                if (!self._action.Contains(character.CurrentAnimation) && 
+                    character.CurrentAnimation == "Amarture_VER2|attack.jumper.1") {
+                    self._action.Add(character.CurrentAnimation);
+                    Input.SetKeyDefaultEnabled("Titan/Jump", false);
+                } elif (!self._action.Contains(character.CurrentAnimation) && 
+                       character.CurrentAnimation != "Amarture_VER2|attack.jumper.1") {
+                    Input.SetKeyDefaultEnabled("Titan/Jump", false);
+                }
+            }
+        }
+    }
+    
+    function OnSecond() {
+        if (!Main.EnableTitanJumpCooldown) { return; }
+        
+        # Update cooldown timer
+        if (!self._jumpKeyEnabled && self._jumpRoundTime > 0) {
+            self._jumpRoundTime -= 1;
+        }
+    }
+    
+    coroutine DelayJump(seconds) {
+        self._jumpRoundTime = seconds;
+        wait seconds;
+        
+        # Reset jump state
+        Input.SetKeyDefaultEnabled("Titan/Jump", true);
+        self._action.Clear();
+        self._jumpKeyEnabled = true;
+        self._jumpRoundTime = 0;
+    }
+}
+
+extension TitanStats {
+    # Default values
+    AttackSpeedMultiplier = Main.TitanAttackSpeed;
+    MaxStamina = Main.TitanMaxStamina;
+    AttackWait = Main.TitanAttackWait;
+
+    function ApplyStats(character) {
+        if (character != null && character.Type == "Titan") {
+            character.AttackSpeedMultiplier = self.AttackSpeedMultiplier;
+            character.MaxStamina = self.MaxStamina;
+            character.AttackWait = self.AttackWait;
+        }
+    }
+
+    function OnCharacterSpawn(character) {
+        self.ApplyStats(character);
+    }
+
+    function OnFrame() {
+        # Reapply in case values get reset
+        self.ApplyStats(Network.MyPlayer.Character);
     }
 }
 
