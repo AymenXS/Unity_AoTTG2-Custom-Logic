@@ -142,6 +142,8 @@ class Main {
         Game.DefaultAddKillScore = false;
         UI.SetScoreboardProperty("KDRA");
         UI.SetScoreboardHeader("Kills / Deaths / Max / Total");
+
+        
         
         if (!RoomData.GetProperty("tutorial_shown", false)) {
             Cutscene.Start("PvTQuickStart", true);
@@ -233,34 +235,31 @@ extension DamageSystem {
             RespawnSystem.QueueRespawn(victim);
         }
             
-        # Process kill feed and scoring
-        weapon = "Blade";
         
         # Human killer case
         if (killerName != "Rock" && killer != null && killer.Type == "Human") {
-            self.HandleHumanKiller(victim, killer, killerName, damage, weapon);
+            self.HandleHumanKiller(victim, killer, killerName, damage);
         }
         
         # Titan killer case
         if (killerName != "Rock" && killer != null && killer.Type == "Titan") {
-            self.HandleTitanKiller(victim, killer, killerName, weapon);
+            self.HandleTitanKiller(victim, killer, killerName, damage);
         }
         
         # Rock kill case
         if (killerName == "Rock") {
-            self.HandleRockKill(victim, weapon);
+            self.HandleRockKill(victim, killer, killerName, damage);
         }
     }
 
-    function HandleHumanKiller(victim, killer, killerName, damage, weapon) {
-        weapon = killer.Weapon;
-        damage = damage;
-        
+    function HandleHumanKiller(victim, killer, killerName, damage) {
+        Game.Print("Titan killed by " + killerName + " with " + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
+
         Game.ShowKillFeed(
             TeamSystem.TeamHeader(killer),
             TeamSystem.TeamHeader(victim),
             damage,
-            weapon
+            "Blade"
         );
         
         # Update killer's score if local player
@@ -275,27 +274,32 @@ extension DamageSystem {
         }
     }
 
-    function HandleTitanKiller(victim, killer, killerName, weapon) {
+    function HandleTitanKiller(victim, killer, killerName, damage) {
+         Game.Print("Human killed by " + killerName + " with " + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
+
         if (victim.Name == Network.MyPlayer.Name) {
             # Calculate velocity-based damage
             damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
+            # damage = Network.MyPlayer.Character.Velocity.Magnitude * Main.DamageMultiplier;
             
             Game.ShowKillFeedAll(
                 TeamSystem.TeamHeader(killer),
                 TeamSystem.TeamHeader(victim),
                 damage,
-                weapon
+                "Titan"
             );
+            ScoreSystem.UpdateScore(killer.Player, true, Convert.ToInt(damage), false);
             ScoreSystem.UpdateScore(victim.Player, false, 0, false);
         }
         
-        if (killer.Name == Network.MyPlayer.Name) {
-            ScoreSystem.UpdateScore(killer.Player, true, 0, false);
-        }
+        # if (killer.Name == Network.MyPlayer.Name) {
+        #     ScoreSystem.UpdateScore(killer.Player, true, damage, false);
+        # }
     }
 
-    function HandleRockKill(victim, weapon) {
+    function HandleRockKill(victim, killer, killerName, damage) {
         if (victim.Name == Network.MyPlayer.Name) {
+            Game.Print("Human killed by " + killerName + "Victim is: " + victim.Name + " Killer is: " + killer + "damage: " + damage);
             # Calculate velocity-based damage
             damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
             
@@ -303,7 +307,7 @@ extension DamageSystem {
                 "<b><color='#ff0000'>ROCK</color></b>",
                 TeamSystem.TeamHeader(victim),
                 damage,
-                weapon
+                "Titan"
             );
             ScoreSystem.UpdateScore(victim.Player, false, 0, false);
         }
@@ -911,6 +915,7 @@ extension KCRevival {
     }
 
     function OnSpawn() {
+        if (!Main.EnableKCRevivalSystem) {return;}
         self.ResetState();
     }
 
@@ -920,6 +925,7 @@ extension KCRevival {
     }
 
     function ShowRevivalCount() {
+        if (!Main.EnableKCRevivalSystem) {return;}
         if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
         {
             return;
@@ -947,6 +953,7 @@ extension KCRevival {
 
     function ProcessTitanKill(killerName, value)
     {
+        if (!Main.EnableKCRevivalSystem) {return;}
         if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
         {
             return;
