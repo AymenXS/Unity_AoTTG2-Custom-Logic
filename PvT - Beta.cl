@@ -710,7 +710,7 @@ extension CommandSystem {
         if (ptcount == 0) {
             # Game.Print("There are no player titans in this room.");
         } else {
-            Game.Print("Revived all PTs.");
+            # Game.Print("Revived all PTs.");
         }
     }
 
@@ -725,7 +725,7 @@ extension CommandSystem {
         if (humanCount == 0) {
             # Game.Print("There are no humans in this room.");
         } else {
-            Game.Print("Revived all Humans!");
+            # Game.Print("Revived all Humans!");
         }
     }
 }
@@ -783,8 +783,7 @@ extension AHSSUnlockSystem {
     }
     
     # Helper functions
-    function GetPlayerData(playerName)
-    {
+    function GetPlayerData(playerName) {
         if (!self.PlayerData.Contains(playerName))
         {
             data = Dict();
@@ -1378,6 +1377,7 @@ extension TeamSystem {
                     ScoreSystem._HumanScore += 1;
                     CommandSystem.ReviveAllHumans();
                     CommandSystem.ReviveAllPTs();
+                    Game.Print("Round Reset!");
                     Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
                 }
             }
