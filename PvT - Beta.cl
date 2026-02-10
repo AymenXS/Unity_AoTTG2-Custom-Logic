@@ -150,11 +150,11 @@ class Main {
         Game.DefaultShowKillFeed = false;
         Game.DefaultHideKillScore = false;
         Game.DefaultAddKillScore = false;
-        UI.SetScoreboardProperty("KDRS");
+        UI.SetScoreboardProperty("KDRA");
         UI.SetScoreboardHeader("Kills / Deaths / Max / Total");
 
         player = Network.MyPlayer;
-        player.SetCustomProperty("KDRS", 
+        player.SetCustomProperty("KDRA", 
             player.Kills + " / " + player.Deaths + 
             " / " + player.HighestDamage + " / " + player.TotalDamage
         );
@@ -283,7 +283,6 @@ extension DamageSystem {
         
         # Update killer's score if local player
         if (killer.Name == Network.MyPlayer.Name) {
-            Game.ShowKillScore(damage);
             ScoreSystem.UpdateScore(killer.Player, true, damage, false);
         } 
         
@@ -294,45 +293,103 @@ extension DamageSystem {
     }
 
     function HandleTitanKiller(victim, killer, killerName, damage) {
-        if (victim.Name == Network.MyPlayer.Name) {
-            # Calculate velocity-based damage
-            damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
 
-            killerHeader = TeamSystem.TeamHeader(killer);
+    # ---------- VICTIM SIDE ----------
+    # Only the victim reliably knows the real velocity-based damage
+    if (victim.Name == Network.MyPlayer.Name) {
 
-            anim = killer.CurrentAnimation;
+        titanDamage =
+            MovementSystem.lastMagnitudes.Get(
+                "mag-" + victim.Player.ID,
+                5.0
+            ) * 10.0 + 1;
 
-            # Match the real jump-attack clip name
-            if (String.Contains(anim, "attack.jumper")) {
-                killerHeader = killerHeader + "'s NOM";
-            }
+        titanDamageInt = Convert.ToInt(titanDamage);
 
-            Game.ShowKillFeedAll(
-                killerHeader,
-                TeamSystem.TeamHeader(victim),
-                damage,
-                "Titan"
-            );
-            ScoreSystem.UpdateScore(victim.Player, false, 0, false);
+        killerHeader = TeamSystem.TeamHeader(killer);
+
+        anim = String.ToLower(killer.CurrentAnimation);
+
+        # Jump attack → Nom suffix
+        if (String.Contains(anim, "attack.jumper")) {
+            killerHeader = killerHeader + "'s NOM";
         }
 
-        if (killer.Name == Network.MyPlayer.Name) {
-            ScoreSystem.UpdateScore(killer.Player, true, Convert.ToInt(damage), false);
-        }
+        Game.ShowKillFeedAll(
+            killerHeader,
+            TeamSystem.TeamHeader(victim),
+            titanDamageInt,
+            "Titan"
+        );
+
+        # Victim only gets death
+        ScoreSystem.UpdateScore(victim.Player, false, 0, false);
+
+        # SYNC REAL DAMAGE TO KILLER
+        Network.SendMessageAll(
+            "KillCredit|" +
+            killer.Name + "|" +
+            Convert.ToString(titanDamageInt)
+        );
     }
+}
 
     function HandleRockKill(victim, killer, killerName, damage) {
+        # Rock damage is also velocity-based and ONLY correct on victim side
+        rockDamage =
+            MovementSystem.lastMagnitudes.Get(
+                "mag-" + victim.Player.ID,
+                5.0
+            ) * 10.0 + 1;
+
+        rockDamageInt = Convert.ToInt(rockDamage);
+
+        # ---------- VICTIM SIDE ----------
         if (victim.Name == Network.MyPlayer.Name) {
-            # Calculate velocity-based damage
-            damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
-            
+
             Game.ShowKillFeedAll(
                 TeamSystem.RockHeader(killerName),
                 TeamSystem.TeamHeader(victim),
-                damage,
+                rockDamageInt,
                 "Titan"
             );
+
+            # Victim only gets death
             ScoreSystem.UpdateScore(victim.Player, false, 0, false);
+
+            # Extract rock owner name (string-only)
+            rockOwnerName =
+                String.Replace(killerName, "'s Rock", "");
+
+            # 🔴 SYNC REAL DAMAGE TO KILLER
+            Network.SendMessageAll(
+                "KillCredit|" +
+                rockOwnerName + "|" +
+                Convert.ToString(rockDamageInt)
+            );
+        }
+    }
+
+    function NamesMatchLoose(a, b) {
+        aa = String.ToLower(String.Trim(a));
+        bb = String.ToLower(String.Trim(b));
+        return (aa == bb || String.Contains(aa, bb) || String.Contains(bb, aa));
+    }
+
+    function HandleKillCreditMessage(sender, message) {
+        # message format:
+        # KillCredit|<ownerName>|<damageInt>
+        parts = String.Split(message, "|");
+        if (parts.Count < 3) { return; }
+
+        ownerName = parts.Get(1);
+        dmgStr = parts.Get(2);
+        dmg = Convert.ToInt(dmgStr);
+
+        # Only the owner (local player) should apply credit
+        if (self.NamesMatchLoose(Network.MyPlayer.Name, ownerName)) {
+            Game.ShowKillScore(dmg);
+            ScoreSystem.UpdateScore(Network.MyPlayer, true, dmg, false);
         }
     }
 }
@@ -377,6 +434,9 @@ extension NetworkSystem {
         elif (String.StartsWith(message, "clearchat")) {
             self.HandleClearChat(sender, message);
         }
+        elif (String.StartsWith(message, "KillCredit|")) {
+            DamageSystem.HandleKillCreditMessage(sender, message);
+        }
     }
 
     function HandleModCommand(sender, message) {
@@ -394,7 +454,7 @@ extension NetworkSystem {
             Time.TimeScale = 1.0;
             Game.Print("Slow motion disabled");
         } else {
-            Time.TimeScale = 0.33;
+            Time.TimeScale = 0.5;
             Game.Print("Slow motion enabled");
         }
     }
@@ -623,7 +683,7 @@ extension CommandSystem {
             if (cmdword == "slowmo") {
                 if (Network.IsMasterClient || Network.MyPlayer.ID == Main.Moderator) {
                     if (Time.TimeScale == 1.0) {
-                        Time.TimeScale = 0.33;
+                        Time.TimeScale = 0.5;
                         Game.Print("Slow motion enabled");
                         if (Network.IsMasterClient) {
                             Network.SendMessageAll("slowmo");
@@ -1342,7 +1402,7 @@ extension TeamSystem {
             );
             
             if (Main._SlowMode) {
-                Time.TimeScale = 0.33; # slowmo ending
+                Time.TimeScale = 0.5; # slowmo ending
                 Game.End(3.33);
             } else {
                 Game.End(10);
@@ -1360,7 +1420,7 @@ extension TeamSystem {
                     );
                     
                     if (Main._SlowMode) {
-                        Time.TimeScale = 0.33;
+                        Time.TimeScale = 0.5;
                         Game.End(3.33);
                     } else {
                         Game.End(10);
@@ -1377,7 +1437,7 @@ extension TeamSystem {
                     );
                     
                     if (Main._SlowMode) {
-                        Time.TimeScale = 0.33;
+                        Time.TimeScale = 0.5;
                         Game.End(3.33);
                     } else {
                         Game.End(5);
