@@ -111,21 +111,44 @@ class Main {
     _SlowMode = true;
     _SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
 
-    # UI State
+# UI State
     _rulesPopupCreated = false;
     _debugPopupCreated = false;
 
-    # Permission Messages
+# Permission Messages
     _nopermission = "<color='#CC0000'>Error: You do not have permission!</color>";
 
-    # Runtime state
+# Runtime state
     _NoRespawnLockActive = false;
     _Final1v1Teleported = false;
     _Final1v1SequenceRunning = false;
 
+# Debug
+    DebugMode = false;
+    DebugLogToFile = false;
+    _DebugLogFileName = "pvt";
+    DebugLogFlushSeconds = 600; # 10 minutes
+    DebugLogMaxBuffer = 8000;   # chars
+    DebugLogWindowSeconds = 300; # keep last 5 minutes
+    SuperDebugMode = false;
+    SuperDebugLogToFile = false;
+    SuperDebugLogFileName = "pvtsuper";
+    SuperDebugLogFlushSeconds = 300; # 5 minutes
+    SuperDebugLogMaxBuffer = 20000; # chars
+    SuperDebugLogWindowFrames = 600; # keep last ~10s at 60fps
+    SuperDebugConsoleEnabled = false;
+    SuperDebugSampleEveryFrames = 10;
+    DebugStartOnLaunch = false;
+
 
  /*===== INITIALIZATION =====*/
     function Init() {
+        if (!Main.DebugStartOnLaunch) {
+            Main.DebugMode = false;
+            Main.DebugLogToFile = false;
+            Main.SuperDebugMode = false;
+            Main.SuperDebugLogToFile = false;
+        }
         # Initialize systems only if they're enabled
         if (Main._EnableIdleSystem) {
             IdleSystem.AfkKillTime = self._IdleKillTime;
@@ -162,6 +185,11 @@ class Main {
             TitanJumpCooldown.Init();
         }
 
+        if (Main.DebugLogToFile) {
+            Main._DebugLogFileName = "pvt";
+            DebugSystem.EnsureFileLoaded();
+        }
+
         # Always configure UI basics
         UI.SetLabel("MiddleCenter", "");
         Game.DefaultShowKillFeed = false;
@@ -190,54 +218,60 @@ class Main {
     /*===== EVENT HANDLERS =====*/
     function OnFrame() {
         # Per-frame updates for enabled systems
-        if (Main._EnableMovementSystem) {MovementSystem.TrackMovement();}
-        if (Main._EnableIdleSystem) {IdleSystem.OnFrame();}
-        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnFrame();}
+        if (Main._EnableMovementSystem) {MovementSystem.TrackMovement(); DebugSystem.Inc("MovementFrame");}
+        if (Main._EnableIdleSystem) {IdleSystem.OnFrame(); DebugSystem.Inc("IdleFrame");}
+        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnFrame(); DebugSystem.Inc("AHSSFrame");}
         if (Main._EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnFrame();
+            DebugSystem.Inc("TitanJumpFrame");
         }
+        DebugSystem.FrameSnapshot();
     }
 
     function OnSecond() {
         # Per-second updates for enabled systems
-        if (Main._EnableIdleSystem) {IdleSystem.OnSecond();}
-        if (Main._EnableRespawnSystem) {RespawnSystem.OnSecond();}
-        if (Main._EnableRockThrowSystem) {RockThrowSystem.OnSecond();}
-        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnSecond();}
+        if (Main._EnableIdleSystem) {IdleSystem.OnSecond(); DebugSystem.Inc("IdleSecond");}
+        if (Main._EnableRespawnSystem) {RespawnSystem.OnSecond(); DebugSystem.Inc("RespawnSecond");}
+        if (Main._EnableRockThrowSystem) {RockThrowSystem.OnSecond(); DebugSystem.Inc("RockThrowSecond");}
+        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnSecond(); DebugSystem.Inc("AHSSSecond");}
         if (Main._EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnSecond();
+            DebugSystem.Inc("TitanJumpSecond");
         }
-        if (Main._EnableTeamSystem) {TeamSystem.CheckFinal1v1Lock();}
+        if (Main._EnableTeamSystem) {TeamSystem.CheckFinal1v1Lock(); DebugSystem.Inc("TeamSecond");}
+
+        DebugSystem.ReportAndReset();
 
     }
 
     function OnCharacterSpawn(character) {
         # Update UI and apply spawn-related systems
-        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
-        if (Main._EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character);}
-        if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn();}
+        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamSpawn");}
+        if (Main._EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character); DebugSystem.Inc("RockThrowSpawn");}
+        if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn(); DebugSystem.Inc("KTRSpawn");}
         PlayerTitanStats.OnCharacterSpawn(character);
     }
 
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
         # Damage processing and win checks
-        if (Main._EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage);}
+        if (Main._EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage); DebugSystem.Inc("Damage");}
         if (Main._EnableTeamSystem) {
             TeamSystem.CheckVictoryConditions();
             TeamSystem.UpdateTeamUI();
+            DebugSystem.Inc("TeamDamage");
         }
     }
 
     function OnCharacterDie(victim, killer, killerName) {
         # Death handling for revival and stats
-        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);}
-        if (Main._EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName);}
-        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
+        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName); DebugSystem.Inc("AHSSKill");}
+        if (Main._EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName); DebugSystem.Inc("Death");}
+        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamDeath");}
     }   
 
     function OnNetworkMessage(sender, message) {
         # Route network events to system handlers
-        if (Main._EnableNetworkSystem) {NetworkSystem.HandleMessage(sender, message);}
+        if (Main._EnableNetworkSystem) {NetworkSystem.HandleMessage(sender, message); DebugSystem.Inc("NetworkMsg");}
     }
 
     function OnChatInput(message) {
@@ -254,6 +288,243 @@ class Main {
 #======================================================================
 # EXTENSIONS
 #======================================================================
+
+extension DebugSystem {
+    _counts = new Dict();
+    _logBuffer = "";
+    _logSeconds = 0;
+    _flushCounter = 0;
+    _fileLoaded = false;
+    _fileLog = "";
+    _fileValid = false;
+    _fileNameChecked = false;
+    _frameCount = 0;
+    _recentLines = List();
+    _superLogBuffer = "";
+    _superFlushCounter = 0;
+    _superFileLoaded = false;
+    _superFileValid = false;
+    _superFileNameChecked = false;
+    _superRecentLines = List();
+
+    function Inc(key) {
+        if (!Main.DebugMode) {return;}
+        if (self._counts == null) { self._counts = new Dict(); }
+        current = self._counts.Get(key, 0);
+        self._counts.Set(key, current + 1);
+    }
+
+    function Get(key) {
+        if (self._counts == null) { return 0; }
+        return self._counts.Get(key, 0);
+    }
+
+    function ReportAndReset() {
+        if (!Main.DebugMode) {return;}
+
+        msg = "[DEBUG]" + String.Newline +
+            "  Frame: Mv=" + self.Get("MovementFrame") +
+            " Idle=" + self.Get("IdleFrame") +
+            " AHSS=" + self.Get("AHSSFrame") +
+            " Jmp=" + self.Get("TitanJumpFrame") + String.Newline +
+            "  Second: Idle=" + self.Get("IdleSecond") +
+            " Resp=" + self.Get("RespawnSecond") +
+            " Rock=" + self.Get("RockThrowSecond") +
+            " AHSS=" + self.Get("AHSSSecond") +
+            " Jmp=" + self.Get("TitanJumpSecond") +
+            " Team=" + self.Get("TeamSecond") + String.Newline +
+            "  Events: Dmg=" + self.Get("Damage") +
+            " Death=" + self.Get("Death") +
+            " TeamDmg=" + self.Get("TeamDamage") +
+            " TeamDeath=" + self.Get("TeamDeath") +
+            " TeamSpawn=" + self.Get("TeamSpawn") +
+            " KTRSpawn=" + self.Get("KTRSpawn") +
+            " RockSpawn=" + self.Get("RockThrowSpawn") +
+            " AHSSKill=" + self.Get("AHSSKill") +
+            " Net=" + self.Get("NetworkMsg");
+
+        Game.Debug(msg);
+
+        if (Main.DebugLogToFile) {
+            self.AppendLog(msg);
+        }
+
+        self._counts = new Dict();
+    }
+
+    function FrameSnapshot() {
+        if (!Main.SuperDebugMode) {return;}
+        self._frameCount += 1;
+
+        if (Main.SuperDebugSampleEveryFrames > 1) {
+            if ((self._frameCount % Main.SuperDebugSampleEveryFrames) != 0) {
+                return;
+            }
+        }
+
+        vel = "n/a";
+        if (Network.MyPlayer != null && Network.MyPlayer.Character != null) {
+            char = Network.MyPlayer.Character;
+            if (char.Type == "Human") {
+                velValue = MovementSystem.lastMagnitudes.Get("mag-"+char.Player.ID, 0.0);
+                vel = String.FormatFloat(velValue, 2);
+            }
+        }
+        msg = "[SDEBUG f" + Convert.ToString(self._frameCount) + "] Vel=" + vel;
+        if (Main.SuperDebugConsoleEnabled) {
+            Game.Debug(msg);
+        }
+        if (Main.SuperDebugLogToFile) {
+            self.AppendSuperLog(msg);
+        }
+    }
+
+    function AppendSuperLog(line) {
+        self._superFlushCounter += 1;
+
+        entry = line;
+        self._superRecentLines.Add(entry);
+        if (self._superRecentLines.Count > Main.SuperDebugLogWindowFrames) {
+            self._superRecentLines.RemoveAt(0);
+        }
+
+        self._superLogBuffer += entry + String.Newline;
+
+        if (String.Length(self._superLogBuffer) >= Main.SuperDebugLogMaxBuffer ||
+            self._superFlushCounter >= Main.SuperDebugLogFlushSeconds) {
+            self.FlushSuperLog();
+        }
+    }
+
+    function EnsureSuperFileLoaded() {
+        if (self._superFileLoaded) {return;}
+        if (!self._superFileNameChecked) {
+            ok = PersistentData.IsValidFileName(Main.SuperDebugLogFileName);
+            Game.Debug("[DEBUG] Super log file name '" + Main.SuperDebugLogFileName + "' valid=" + Convert.ToString(ok));
+            self._superFileNameChecked = true;
+        }
+
+        if (!PersistentData.IsValidFileName(Main.SuperDebugLogFileName)) {
+            Game.Debug("[DEBUG] Invalid super log file name. Falling back to 'pvtsuper'.");
+            Main.SuperDebugLogFileName = "pvtsuper";
+            self._superFileLoaded = true;
+            self._superFileValid = false;
+            return;
+        }
+        self._superFileValid = true;
+
+        if (PersistentData.FileExists(Main.SuperDebugLogFileName)) {
+            PersistentData.LoadFromFile(Main.SuperDebugLogFileName, false);
+        }
+        self._superFileLoaded = true;
+    }
+
+    function FlushSuperLog() {
+        if (!Main.SuperDebugLogToFile) {return;}
+        if (String.Length(self._superLogBuffer) == 0) {return;}
+
+        self.EnsureSuperFileLoaded();
+        if (!self._superFileLoaded || !self._superFileValid) {return;}
+
+        joined = "";
+        for (line in self._superRecentLines) {
+            joined = joined + line + String.Newline;
+        }
+        PersistentData.SetProperty("pvt_super_debug_log", joined);
+        PersistentData.SaveToFile(Main.SuperDebugLogFileName, false);
+
+        self._superLogBuffer = "";
+        self._superFlushCounter = 0;
+    }
+
+    function ClearSuperLog() {
+        if (!PersistentData.IsValidFileName(Main.SuperDebugLogFileName)) {return;}
+        PersistentData.Clear();
+        PersistentData.SetProperty("pvt_super_debug_log", "");
+        PersistentData.SaveToFile(Main.SuperDebugLogFileName, false);
+        self._superLogBuffer = "";
+        self._superFlushCounter = 0;
+        self._superFileLoaded = false;
+        self._superFileValid = false;
+        self._superRecentLines = List();
+    }
+
+    function AppendLog(line) {
+        self._logSeconds += 1;
+        self._flushCounter += 1;
+
+        entry = Convert.ToString(self._logSeconds) + "s | " + line;
+        self._recentLines.Add(entry);
+        if (self._recentLines.Count > Main.DebugLogWindowSeconds) {
+            self._recentLines.RemoveAt(0);
+        }
+
+        self._logBuffer += entry + String.Newline;
+
+        if (String.Length(self._logBuffer) >= Main.DebugLogMaxBuffer ||
+            self._flushCounter >= Main.DebugLogFlushSeconds) {
+            self.FlushLog();
+        }
+    }
+
+    function EnsureFileLoaded() {
+        if (self._fileLoaded) {return;}
+        if (!self._fileNameChecked) {
+            ok = PersistentData.IsValidFileName(Main._DebugLogFileName);
+            Game.Debug("[DEBUG] Log file name '" + Main._DebugLogFileName + "' valid=" + Convert.ToString(ok));
+            self._fileNameChecked = true;
+        }
+
+        if (!PersistentData.IsValidFileName(Main._DebugLogFileName)) {
+            Game.Debug("[DEBUG] Invalid log file name. Falling back to 'pvt'.");
+            Main._DebugLogFileName = "pvt";
+            self._fileLoaded = true;
+            self._fileValid = false;
+            return;
+        }
+        self._fileValid = true;
+
+        if (PersistentData.FileExists(Main._DebugLogFileName)) {
+            PersistentData.LoadFromFile(Main._DebugLogFileName, false);
+            self._fileLog = PersistentData.GetProperty("pvt_beta_debug_log", "");
+        } else {
+            self._fileLog = "";
+        }
+        self._fileLoaded = true;
+    }
+
+    function FlushLog() {
+        if (!Main.DebugLogToFile) {return;}
+        if (String.Length(self._logBuffer) == 0) {return;}
+
+        self.EnsureFileLoaded();
+        if (!self._fileLoaded || !self._fileValid) {return;}
+
+        # Overwrite file with only the last window of lines
+        joined = "";
+        for (line in self._recentLines) {
+            joined = joined + line + String.Newline;
+        }
+        PersistentData.SetProperty("pvt_beta_debug_log", joined);
+        PersistentData.SaveToFile(Main._DebugLogFileName, false);
+
+        self._logBuffer = "";
+        self._flushCounter = 0;
+    }
+
+    function ClearLog() {
+        if (!PersistentData.IsValidFileName(Main._DebugLogFileName)) {return;}
+        PersistentData.Clear();
+        PersistentData.SetProperty("pvt_beta_debug_log", "");
+        PersistentData.SaveToFile(Main._DebugLogFileName, false);
+        self._fileLog = "";
+        self._logBuffer = "";
+        self._flushCounter = 0;
+        self._fileLoaded = false;
+        self._fileValid = false;
+        self._recentLines = List();
+    }
+}
 
 extension MovementSystem {
     lastMagnitudes = new Dict();
@@ -748,6 +1019,69 @@ extension CommandSystem {
                         Convert.ToString(pos.Z));
                 } else {
                     Game.Print("POS: character not available.");
+                }
+                return false;
+            }
+
+            # Debug controls
+            if (cmdword == "debugstart") {
+                Main.DebugMode = true;
+                Main.DebugLogToFile = true;
+                Main._DebugLogFileName = "pvt";
+                Game.Print("Debug logging enabled.");
+                return false;
+            }
+            if (cmdword == "debugstop") {
+                Main.DebugMode = false;
+                Main.DebugLogToFile = false;
+                Main.SuperDebugMode = false;
+                Main.SuperDebugLogToFile = false;
+                Game.Print("Debug logging disabled.");
+                return false;
+            }
+            if (cmdword == "superdebugstart") {
+                Main.SuperDebugMode = true;
+                Main.SuperDebugLogToFile = true;
+                Game.Print("Super debug enabled (frame-by-frame).");
+                return false;
+            }
+            if (cmdword == "superdebugstop") {
+                Main.SuperDebugMode = false;
+                Main.SuperDebugLogToFile = false;
+                Game.Print("Super debug disabled.");
+                return false;
+            }
+            if (cmdword == "superdebugflush") {
+                DebugSystem.FlushSuperLog();
+                Game.Print("Super debug log flushed to file.");
+                return false;
+            }
+            if (cmdword == "superdebugclear") {
+                DebugSystem.ClearSuperLog();
+                Game.Print("Super debug log cleared.");
+                return false;
+            }
+            if (cmdword == "debugflush") {
+                DebugSystem.FlushLog();
+                Game.Print("Debug log flushed to file.");
+                return false;
+            }
+            if (cmdword == "debugclear") {
+                DebugSystem.ClearLog();
+                Game.Print("Debug log cleared.");
+                return false;
+            }
+            if (cmdword == "debugfiletest") {
+                names = List();
+                names.Add("pvtbetadebug");
+                names.Add("pvt_beta_debug");
+                names.Add("pvt-beta-debug");
+                names.Add("pvt");
+                names.Add("debug");
+                names.Add("pvt1");
+                for (n in names) {
+                    ok = PersistentData.IsValidFileName(n);
+                    Game.Print("FILETEST " + n + " => " + Convert.ToString(ok));
                 }
                 return false;
             }
