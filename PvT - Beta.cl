@@ -4,18 +4,18 @@
 # Credits to Lavasuna for the BetterWaves CL
 #
 # Features:
-# - Tutorial and Rules for beginners
-# - Team-based respawn feature with dynamic timers
-# - Velocity-based damage calculations
-# - Win condition tracking (Humans vs Titans)
-# - Special player abilities (rock throw)
-# - Idle mode with automatic respawn
-# - Admin commands
-# - Custom UI popups for rules and debug info
-# - Slow motion ending
-# - Kill to Revive system
-# - AHSS unlock system with point tracking
-# - Titan's Stats modification (Inspired by Hao's CL)
+# - Tutorial and rules popup
+# - Team system with win conditions and UI counters
+# - Dynamic respawn timers and scaling
+# - Velocity-based damage and custom kill feed
+# - Kill-to-revive for humans and titans
+# - Rock throw restrictions for PTs
+# - Idle/AFK auto-kill and respawn
+# - Admin commands (revive, reset, scores)
+# - Network sync (wins, revive-all, damage credit)
+# - Titan jump cooldown
+# - Configurable player titan stats
+# - Slow-motion match ending
 #======================================================================
 class Main {    
     /*===== GAME CONFIGURATION =====*/
@@ -143,9 +143,9 @@ class Main {
             RockThrowSystem.Init();
         }
         
-        # if (Main._EnableAhssUnlockSystem) {
-        #     AHSSUnlockSystem.Initialize();
-        # }
+        if (Main._EnableAhssUnlockSystem) {
+            AHSSUnlockSystem.Initialize();
+        }
         
         if (Main._EnableTitanJumpCooldown) {
             TitanJumpCooldown.Init();
@@ -181,6 +181,7 @@ class Main {
         # Per-frame updates for enabled systems
         if (Main._EnableMovementSystem) {MovementSystem.TrackMovement();}
         if (Main._EnableIdleSystem) {IdleSystem.OnFrame();}
+        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnFrame();}
         if (Main._EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnFrame();
         }
@@ -191,6 +192,7 @@ class Main {
         if (Main._EnableIdleSystem) {IdleSystem.OnSecond();}
         if (Main._EnableRespawnSystem) {RespawnSystem.OnSecond();}
         if (Main._EnableRockThrowSystem) {RockThrowSystem.OnSecond();}
+        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnSecond();}
         if (Main._EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnSecond();
         }
@@ -216,7 +218,7 @@ class Main {
 
     function OnCharacterDie(victim, killer, killerName) {
         # Death handling for revival and stats
-        # if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);}
+        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);}
         if (Main._EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName);}
         if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
     }   
@@ -445,6 +447,9 @@ extension NetworkSystem {
         }
         elif (String.StartsWith(message, "AHSS_UNLOCK|")) {
             # Handle AHSS unlock sync
+        }
+        elif (message == "AHSS_EXHAUSTED") {
+            AHSSUnlockSystem.HandleExhausted();
         }
         elif (String.StartsWith(message, "WinSync:")) {
             ScoreSystem.HandleWinSync(message);
@@ -839,13 +844,20 @@ extension AHSSUnlockSystem {
     # Configuration - adjust these values as needed
     PointsForAHSS = 15;
     AITitanPointValue = 1;
-    PlayerTitanPointValue = 5;
+    PlayerTitanPointValue = 3;
     _ahssConfirmationEnabled = true;
     
     # State tracking
     PlayerData = Dict();
     _ahssUnlocker = null;
     _ahssUnlocked = false;
+    _ahssExhausted = false;
+    _unlockPending = false;
+    _unlockHoldSeconds = 0;
+    _equipHoldSeconds = 0;
+    _lastAmmoRound = -1;
+    _lastAmmoLeft = -1;
+    _manualLockHoldSeconds = 0;
     
     # Initialization
     function Initialize()
@@ -853,12 +865,20 @@ extension AHSSUnlockSystem {
         self.PlayerData.Clear();
         self._ahssUnlocker = null;
         self._ahssUnlocked = false;
+        self._ahssExhausted = false;
+        self._unlockPending = false;
+        self._unlockHoldSeconds = 0;
+        self._equipHoldSeconds = 0;
+        self._lastAmmoRound = -1;
+        self._lastAmmoLeft = -1;
+        self._manualLockHoldSeconds = 0;
     }
     
     # Core functionality
     function ProcessTitanKill(victim, killer, killerName) {
         if (!Main._EnableAhssUnlockSystem) {return false;}
         if (victim == null || killer == null || killer.Type != "Human") {return false;}
+        if (self._ahssExhausted) {return false;}
         
         playerName = killer.Name;
         currentData = self.GetPlayerData(playerName);
@@ -910,6 +930,7 @@ extension AHSSUnlockSystem {
     
     function HandleUnlock(character, playerName)
     {
+        if (self._ahssExhausted) {return false;}
         self._ahssUnlocked = true;
         self._ahssUnlocker = playerName;
         
@@ -918,7 +939,8 @@ extension AHSSUnlockSystem {
         
         if (self._ahssConfirmationEnabled && character.IsMine)
         {
-            self.StartConfirmation(character);
+            self._unlockPending = true;
+            self._unlockHoldSeconds = 0;
         }
         else
         {
@@ -927,28 +949,142 @@ extension AHSSUnlockSystem {
         
         return true;
     }
-    
-    coroutine StartConfirmation(character)
+
+    function OnFrame()
     {
-        UI.SetLabelForTime("TopRight", "Hold <color=yellow>'Reload'</color> to unlock AHSS", 5);
-        
-        while (!Input.GetKeyHold("Human/Reload"))
-        {
-            wait 0.1;
+        if (!Main._EnableAhssUnlockSystem) {return;}
+
+        if (Network.MyPlayer == null || Network.MyPlayer.Character == null) {return;}
+        character = Network.MyPlayer.Character;
+        if (character.Type != "Human") {return;}
+
+        if (self._unlockPending) {
+            UI.SetLabel("BottomRight", "Hold <color=yellow>'Reload'</color> for 2s to unlock AHSS");
         }
-        
-        self.ActivateAHSS(character);
+
+        # Auto-drop AHSS when ammo is exhausted
+        if (character.Weapon == "AHSS") {
+            # Detect gas-station refill by total ammo increase
+            if (self._lastAmmoLeft != -1 &&
+                character.CurrentAmmoLeft > self._lastAmmoLeft) {
+                self.MarkExhausted();
+                return;
+            }
+
+            if (character.CurrentAmmoRound <= 0 && character.CurrentAmmoLeft <= 0) {
+                self.MarkExhausted();
+                return;
+            }
+
+            self._lastAmmoRound = character.CurrentAmmoRound;
+            self._lastAmmoLeft = character.CurrentAmmoLeft;
+        }
+
+        # Prompt and allow switching back to AHSS after unlock
+        if (self._ahssUnlocked && !self._ahssExhausted && character.Weapon != "AHSS") {
+            UI.SetLabel("BottomRight", "Hold <color=yellow>'Reload'</color> for 2s to equip AHSS");
+        } else {
+            if (!self._unlockPending) {
+                UI.SetLabel("BottomRight", "");
+            }
+        }
     }
-    
+
+    function OnSecond()
+    {
+        if (!Main._EnableAhssUnlockSystem) {return;}
+        if (Network.MyPlayer == null || Network.MyPlayer.Character == null) {return;}
+        character = Network.MyPlayer.Character;
+        if (character.Type != "Human") {return;}
+
+        if (self._unlockPending) {
+            if (Input.GetKeyHold("Human/Reload")) {
+                self._unlockHoldSeconds += 1;
+                if (self._unlockHoldSeconds >= 2) {
+                    self._unlockPending = false;
+                    self._unlockHoldSeconds = 0;
+                    self.ActivateAHSS(character);
+                }
+            } else {
+                self._unlockHoldSeconds = 0;
+            }
+            return;
+        }
+
+        if (self._ahssUnlocked && !self._ahssExhausted && character.Weapon != "AHSS") {
+            if (Input.GetKeyHold("Human/Reload")) {
+                self._equipHoldSeconds += 1;
+                if (self._equipHoldSeconds >= 2) {
+                    self._equipHoldSeconds = 0;
+                    self.ActivateAHSS(character);
+                }
+            } else {
+                self._equipHoldSeconds = 0;
+            }
+        } else {
+            self._equipHoldSeconds = 0;
+        }
+
+        # Manual lock: hold reload 2s while on AHSS to force blades + lock
+        if (character.Weapon == "AHSS" && !self._ahssExhausted) {
+            if (Input.GetKeyHold("Human/Reload")) {
+                self._manualLockHoldSeconds += 1;
+                if (self._manualLockHoldSeconds >= 2) {
+                    self._manualLockHoldSeconds = 0;
+                    self.MarkExhausted();
+                }
+            } else {
+                self._manualLockHoldSeconds = 0;
+            }
+        } else {
+            self._manualLockHoldSeconds = 0;
+        }
+    }
+
+    function SwitchToBlades(character)
+    {
+        if (character.Type != "Human") {return;}
+        character.SetWeapon("Blade");
+        self._lastAmmoRound = -1;
+        self._lastAmmoLeft = -1;
+    }
+
+    function MarkExhausted()
+    {
+        if (self._ahssExhausted) {return;}
+        self._ahssExhausted = true;
+        if (Network.IsMasterClient) {
+            Network.SendMessageAll("AHSS_EXHAUSTED");
+        } else {
+            Network.SendMessageAll("AHSS_EXHAUSTED");
+        }
+        character = Network.MyPlayer.Character;
+        if (character != null && character.Type == "Human") {
+            self.SwitchToBlades(character);
+        }
+        UI.SetLabelAll("TopRight", "");
+        UI.SetLabelAll("BottomRight", "");
+    }
+
+    function HandleExhausted()
+    {
+        self._ahssExhausted = true;
+        UI.SetLabelAll("TopRight", "");
+        UI.SetLabelAll("BottomRight", "");
+    }
+
     function ActivateAHSS(character)
     {
         if (character.Type != "Human") {return;}
+        if (self._ahssExhausted) {return;}
         
         character.SetWeapon("AHSS");
         character.CurrentAmmoRound = 2;
         character.CurrentAmmoLeft = 3;
         character.MaxAmmoRound = 2;
         character.MaxAmmoTotal = 3;
+        self._lastAmmoRound = character.CurrentAmmoRound;
+        self._lastAmmoLeft = character.CurrentAmmoLeft;
         
         if (character.IsMine)
         {
