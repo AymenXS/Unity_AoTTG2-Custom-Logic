@@ -10,7 +10,7 @@
 # - Win condition tracking (Humans vs Titans)
 # - Special player abilities (rock throw)
 # - Idle mode with automatic respawn
-# - Admin commands for moderation
+# - Admin commands
 # - Custom UI popups for rules and debug info
 # - Slow motion ending
 # - Kill to Revive system
@@ -22,8 +22,8 @@ class Main {
     EnableIdleSystem = true;
     EnableRespawnSystem = true;
     EnableRockThrowSystem = true;
-    EnableAHSSUnlockSystem = true;
-    EnableKCRevivalSystem = true;
+    EnableAhssUnlockSystem = true;
+    EnableKillToReviveSystem = true;
     EnableDamageSystem = true;
     EnableTeamSystem = true;
     EnableScoreSystem = true;
@@ -34,10 +34,10 @@ class Main {
     # EnableCommandSystem = true;
     
     /*===== GAME CONFIGURATION =====*/
-   # Team Settings
-	ShowTeamScore = true;
+    # Team Settings
+    ShowTeamScore = true;
     TeamOneName = "Humans";
-	TeamTwoName = "Titans";
+    TeamTwoName = "Titans";
 	_TeamOneScore = 0;           # Total human victories
     _TeamTwoScore = 0;           # Total titan victories
     FullClear = true;          # Victory mode
@@ -51,8 +51,7 @@ class Main {
     MinRespawnTime = 30.0;
     MinRespawnTimeTooltip = "Minimum possible respawn delay (cannot go below this).";
 
-    # Moderator Settings
-    Moderator = 0;  # Player ID with moderator privileges
+    # Permission Messages
     _nopermission = "<color='#CC0000'>Error: You do not have permission!</color>";
 
     # Special Abilities
@@ -60,10 +59,7 @@ class Main {
     AuthorizedRockThrowerTooltip = "Player IDs separated by hyphens (1-2-3) who can throw rocks as Titans.";
 
     # Movement Tracking
-    lastMagnitudes = new Dict(); # Tracks each player's movement speed
-
-    # Player States
-    rockthrowers = new List(); # Parsed rock throwers
+    # (moved to MovementSystem)
 
     # Respawn Variables Feature
     respawn_timer_keys = new List(); # Active timers
@@ -77,6 +73,8 @@ class Main {
     ManualHumanTimerTooltip = "Override human dynamic respawn time in seconds.";
     ManualTitanTimer = 0;          # Manual titan respawn time
     ManualTitanTimerTooltip = "Override human dynamic respawn time in seconds.";
+    ReviveAllDelay = 3.0;
+    ReviveAllDelayTooltip = "Delay in seconds before ReviveAll commands respawn players.";
 
     # UI State
     _rulesPopupCreated = false;
@@ -89,18 +87,19 @@ class Main {
     IdleRespawnTooltip = "Allow Idle users to respawn immediately by pressing W.";
 
     # Kill To Revive
-    KillsToRevive = 7;
+    KillsToReviveHuman = 7;
+    KillsToReviveTitan = 7;
 
     # Slow Motion Ending
     _SlowMode = false;
     SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
 
     # Default values - change these to adjust titan behavior
-    TitanAttackSpeed = 5;
+    TitanAttackSpeed = 1.5;
     TitanMaxStamina = 10; 
     TitanStamina = 10; 
     TitanAttackPause = 0.1;
-    JumpCD = 4.0;  # Cooldown in seconds
+    JumpCoolDown = 4.0;  # Cooldown in seconds
 
     /*===== INITIALIZATION =====*/
     function Init() {
@@ -129,7 +128,6 @@ class Main {
         }
         
         if (Main.EnableRockThrowSystem) {
-            self.rockthrowers = String.Split(self.AuthorizedRockThrower, "-");
             RockThrowSystem.Init();
         }
         
@@ -137,10 +135,6 @@ class Main {
         #     AHSSUnlockSystem.Initialize();
         # }
         
-        if (Main.EnableKCRevivalSystem) {
-            KCRevival.Init();
-        }
-
         if (Main.EnableTitanJumpCooldown) {
             TitanJumpCooldown.Init();
         }
@@ -166,15 +160,13 @@ class Main {
     }
 
     function OnGameStart() {
+        # Spawn initial AI titans
         Game.SpawnTitansAsync("Default", self.Titans);
     }
 
     /*===== EVENT HANDLERS =====*/
-    function OnTick() {
-        # Empty or custom tick logic
-    }
-    
     function OnFrame() {
+        # Per-frame updates for enabled systems
         if (Main.EnableMovementSystem) {MovementSystem.TrackMovement();}
         if (Main.EnableIdleSystem) {IdleSystem.OnFrame();}
         if (Main.EnableTitanJumpCooldown) {
@@ -183,42 +175,52 @@ class Main {
     }
 
     function OnSecond() {
-        if (Main.EnableKCRevivalSystem) {KCRevival.OnSecond();}
+        # Per-second updates for enabled systems
         if (Main.EnableIdleSystem) {IdleSystem.OnSecond();}
         if (Main.EnableRespawnSystem) {RespawnSystem.OnSecond();}
         if (Main.EnableRockThrowSystem) {RockThrowSystem.OnSecond();}
         if (Main.EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnSecond();
         }
-        # PlayerTitanStats.OnSecond();
 
     }
 
     function OnCharacterSpawn(character) {
+        # Update UI and apply spawn-related systems
         if (Main.EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
         if (Main.EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character);}
+        if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn();}
         PlayerTitanStats.OnCharacterSpawn(character);
     }
 
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
+        # Damage processing and win checks
         if (Main.EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage);}
-        if (Main.EnableTeamSystem) {TeamSystem.CheckVictoryConditions();}
+        if (Main.EnableTeamSystem) {
+            TeamSystem.CheckVictoryConditions();
+            TeamSystem.UpdateTeamUI();
+        }
     }
 
     function OnCharacterDie(victim, killer, killerName) {
+        # Death handling for revival and stats
         # if (Main.EnableAHSSUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);}
         if (Main.EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName);}
+        if (Main.EnableTeamSystem) {TeamSystem.UpdateTeamUI();}
     }   
 
     function OnNetworkMessage(sender, message) {
+        # Route network events to system handlers
         if (Main.EnableNetworkSystem) {NetworkSystem.HandleMessage(sender, message);}
     }
 
     function OnChatInput(message) {
+        # Parse and handle chat commands
         return CommandSystem.HandleCommand(message);
     }
 
     function OnButtonClick(buttonName) {
+        # UI button routing
         UISystem.HandleButtonClick(buttonName);
     }
 }
@@ -233,12 +235,12 @@ extension MovementSystem {
     function TrackMovement() {
         if (!Main.EnableMovementSystem) {return;}
 
-        for (human in Game.PlayerHumans) {
-            if (human != null && human.Player != null) {
-                mag = human.Velocity.Magnitude;
-                if (mag > 1) {
-                    self.lastMagnitudes.Set("mag-"+human.Player.ID, mag);
-                }
+        # Track only local human's last known movement magnitude
+        localChar = Network.MyPlayer.Character;
+        if (localChar != null && localChar.Type == "Human") {
+            mag = localChar.Velocity.Magnitude;
+            if (mag > 1) {
+                self.lastMagnitudes.Set("mag-"+localChar.Player.ID, mag);
             }
         }
     }
@@ -274,6 +276,7 @@ extension DamageSystem {
     }
 
     function HandleHumanKiller(victim, killer, killerName, damage) {
+        # Human kill feed and scoring
         Game.ShowKillFeed(
             TeamSystem.TeamHeader(killer),
             TeamSystem.TeamHeader(victim),
@@ -293,46 +296,47 @@ extension DamageSystem {
     }
 
     function HandleTitanKiller(victim, killer, killerName, damage) {
+        # ---------- VICTIM SIDE ----------
+        # Only the victim reliably knows the real velocity-based damage
+        if (victim.Name == Network.MyPlayer.Name) {
 
-    # ---------- VICTIM SIDE ----------
-    # Only the victim reliably knows the real velocity-based damage
-    if (victim.Name == Network.MyPlayer.Name) {
+            # Compute velocity-based titan damage
+            titanDamage =
+                MovementSystem.lastMagnitudes.Get(
+                    "mag-" + victim.Player.ID,
+                    5.0
+                ) * 10.0 + 1;
 
-        titanDamage =
-            MovementSystem.lastMagnitudes.Get(
-                "mag-" + victim.Player.ID,
-                5.0
-            ) * 10.0 + 1;
+            titanDamageInt = Convert.ToInt(titanDamage);
 
-        titanDamageInt = Convert.ToInt(titanDamage);
+            killerHeader = TeamSystem.TeamHeader(killer);
 
-        killerHeader = TeamSystem.TeamHeader(killer);
+            anim = String.ToLower(killer.CurrentAnimation);
 
-        anim = String.ToLower(killer.CurrentAnimation);
+            # Jump attack → Nom suffix
+            if (String.Contains(anim, "attack.jumper")) {
+                killerHeader = killerHeader + "'s NOM";
+            }
 
-        # Jump attack → Nom suffix
-        if (String.Contains(anim, "attack.jumper")) {
-            killerHeader = killerHeader + "'s NOM";
+            # Show kill feed with computed damage
+            Game.ShowKillFeedAll(
+                killerHeader,
+                TeamSystem.TeamHeader(victim),
+                titanDamageInt,
+                "Titan"
+            );
+
+            # Victim only gets death
+            ScoreSystem.UpdateScore(victim.Player, false, 0, false);
+
+            # Sync real damage to killer
+            Network.SendMessageAll(
+                "KillCredit|" +
+                killer.Name + "|" +
+                Convert.ToString(titanDamageInt)
+            );
         }
-
-        Game.ShowKillFeedAll(
-            killerHeader,
-            TeamSystem.TeamHeader(victim),
-            titanDamageInt,
-            "Titan"
-        );
-
-        # Victim only gets death
-        ScoreSystem.UpdateScore(victim.Player, false, 0, false);
-
-        # SYNC REAL DAMAGE TO KILLER
-        Network.SendMessageAll(
-            "KillCredit|" +
-            killer.Name + "|" +
-            Convert.ToString(titanDamageInt)
-        );
     }
-}
 
     function HandleRockKill(victim, killer, killerName, damage) {
         # Rock damage is also velocity-based and ONLY correct on victim side
@@ -396,10 +400,7 @@ extension DamageSystem {
 
 extension DeathSystem {
     function HandleDeath(victim, killer, killerName) {
-        if (victim.Type == "Human" && victim.IsMine && victim.IsMainCharacter) {
-            KCRevival.OnDeath();
-        }
-
+        # Process death events for revival and kill tracking
          if (victim.Type == "Titan" && killer != null) {
             value = 1;
             if (killer.Type == "Human") {
@@ -407,13 +408,24 @@ extension DeathSystem {
                     value = 0.5;
                 }
             }
-            KCRevival.ProcessTitanKill(killerName, value);
+            if (killer.Type == "Human") {
+                KillToReviveSystem.ProcessKill("Human", killerName, value);
+            }
+        }
+
+        if (victim.Type == "Human") {
+            if (killer != null && killer.Type == "Titan") {
+                KillToReviveSystem.ProcessKill("Titan", killerName, 1);
+            } elif (killer == null && String.EndsWith(killerName, "'s Rock")) {
+                KillToReviveSystem.ProcessKill("Titan", killerName, 1);
+            }
         }
     }
 }
 
 extension NetworkSystem {
     function HandleMessage(sender, message) {
+        # Route incoming network messages to handlers
         if (!Main.EnableNetworkSystem) {return;}
         
         if (message == "AHSS_LOCKED") {
@@ -422,9 +434,6 @@ extension NetworkSystem {
         elif (String.StartsWith(message, "AHSS_UNLOCK|")) {
             # Handle AHSS unlock sync
         }
-        elif (String.StartsWith(message, "mod:")) {
-            self.HandleModCommand(sender, message);
-        } 
         elif (String.StartsWith(message, "WinSync:")) {
             ScoreSystem.HandleWinSync(message);
         }
@@ -434,22 +443,16 @@ extension NetworkSystem {
         elif (String.StartsWith(message, "clearchat")) {
             self.HandleClearChat(sender, message);
         }
+        elif (String.StartsWith(message, "ReviveAllRespawn|")) {
+            self.HandleReviveAllRespawn(message);
+        }
         elif (String.StartsWith(message, "KillCredit|")) {
             DamageSystem.HandleKillCreditMessage(sender, message);
         }
     }
 
-    function HandleModCommand(sender, message) {
-        if (Network.IsMasterClient && sender.ID == Main.Moderator) {
-            cmd = String.Substring(message, 4);
-            if (cmd == "resetkdall" || cmd == "clearchat" || cmd == "reviveall") {
-                Network.SendMessageAll(cmd);
-                Game.Print("Moderator used command: #" + cmd);
-            }
-        }
-    }
-
     function HandleSlowMo(message) {
+        # Toggle slow motion based on message
         if (message == "slowmo_off") {
             Time.TimeScale = 1.0;
             Game.Print("Slow motion disabled");
@@ -460,11 +463,33 @@ extension NetworkSystem {
     }
 
     function HandleClearChat(sender, message) {
+        # Clear chat log for all players
         if (sender == Network.MasterClient) {
             for (i in Range(0, 25, 1)) {
                 Game.Print(String.Newline);
             }
             Game.Print("Chat has been cleared by admin.");
+        }
+    }
+
+    function HandleReviveAllRespawn(message) {
+        # Sync revive-all countdowns to all clients
+        parts = String.Split(message, "|");
+        if (parts.Count < 3) {return;}
+
+        playerID = parts.Get(1);
+        delay = Convert.ToFloat(parts.Get(2));
+
+        target = null;
+        for (p in Network.Players) {
+            if (Convert.ToString(p.ID) == playerID) {
+                target = p;
+                break;
+            }
+        }
+
+        if (target != null && target.Status == "Dead") {
+            RespawnSystem.QueueRespawnWithDelay(target, delay);
         }
     }
 }
@@ -475,6 +500,7 @@ extension UISystem {
     _debugPopupCreated = false;
 
     function HandleButtonClick(buttonName) {
+        # Route popup button actions
         if (buttonName == "CloseRules") {
             UI.HidePopup("RulesPopup");
         }
@@ -484,6 +510,7 @@ extension UISystem {
     }
 
     function CreateRulesPopup() {
+        # Build the rules popup UI once
         if (self._rulesPopupCreated) {return;}
         
         # 1. Create popup container (same dimensions)
@@ -529,6 +556,7 @@ extension UISystem {
     }
 
     function CreateDebugPopup() {
+        # Build the debug popup UI once
         if (self._debugPopupCreated) {return;}
         
         UI.CreatePopup("DebugPopup", "Original Gamemode PvT - GUIDELINES", 900, 700);
@@ -540,6 +568,7 @@ extension UISystem {
     }
 
     function ShowRulesPopup() {
+        # Lazy-create then show rules popup
         if (!self._rulesPopupCreated) {
             self.CreateRulesPopup();
         }
@@ -547,21 +576,26 @@ extension UISystem {
     }
 
     function ShowDebugPopup() {
+        # Lazy-create then show debug popup
         if (!self._debugPopupCreated) {
             self.CreateDebugPopup();
         }
         UI.ShowPopup("DebugPopup");
     }
+
+    
 }
 
 extension RockThrowSystem {
     rockthrowers = new List();
     
     function Init() {
+        # Cache authorized rock throwers list
         self.rockthrowers = String.Split(Main.AuthorizedRockThrower, "-");
     }
     
     function OnSecond() {
+        # Disable rock throw input for unauthorized players
         if (!Main.EnableRockThrowSystem) {return;}
 
         if (Network.MyPlayer != null && 
@@ -575,6 +609,7 @@ extension RockThrowSystem {
     }
     
     function HandleSpawn(character) {
+        # Add outline to authorized player titans
         if (!Main.EnableRockThrowSystem) {return;}
 
         if (character.Type == "Titan" && !character.IsAI) {
@@ -591,41 +626,36 @@ extension RockThrowSystem {
 extension CommandSystem {
     function HandleCommand(message) {
         if (String.StartsWith(message, "#")) {
+            # Parse command and arguments
             message = String.ToLower(message);
             fullcmd = String.Substring(message, 1);
             listcmd = String.Split(fullcmd, " ");
             cmdword = listcmd.Get(0);
             listcmd.RemoveAt(0);
 
-            # ADMIN or MODERATOR commands 	
-			# ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            # ADMIN commands
+            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
 
             # Reset all player stats
             if (cmdword == "resetkdall") {
-				if (Network.IsMasterClient) {
-					Network.SendMessageAll("resetkdall");
-					Game.Print("All players' stats have been reset.");
-				}
-				elif (Network.MyPlayer.ID == Main.Moderator) {
-					Network.SendMessage(Network.MasterClient,"mod:resetkdall");
-				} else {
-					Game.Print(_nopermission);
-				}
-				return false;
-			}
+                if (Network.IsMasterClient) {
+                    Network.SendMessageAll("resetkdall");
+                    Game.Print("All players' stats have been reset.");
+                } else {
+                    Game.Print(_nopermission);
+                }
+                return false;
+            }
 
             if (cmdword == "reviveall") {
-				if (Network.IsMasterClient) {
-					Network.SendMessageAll("reviveall");
-					Game.Print("All players have been revived.");
-				}
-				elif (Network.MyPlayer.ID == Main.Moderator) {
-					Network.SendMessage(Network.MasterClient,"mod:reviveall");
-				} else {
-					Game.Print(_nopermission);
-				}
-				return false;
-			}
+                if (Network.IsMasterClient) {
+                    Network.SendMessageAll("reviveall");
+                    Game.Print("All players have been revived.");
+                } else {
+                    Game.Print(_nopermission);
+                }
+                return false;
+            }
 
             # Revive all player titans
             if (cmdword == "reviveallpt") {
@@ -681,22 +711,18 @@ extension CommandSystem {
 
             # Slow motion toggle
             if (cmdword == "slowmo") {
-                if (Network.IsMasterClient || Network.MyPlayer.ID == Main.Moderator) {
-                    if (Time.TimeScale == 1.0) {
-                        Time.TimeScale = 0.5;
-                        Game.Print("Slow motion enabled");
-                        if (Network.IsMasterClient) {
-                            Network.SendMessageAll("slowmo");
-                        }
-                    } else {
-                        Time.TimeScale = 1.0;
-                        Game.Print("Slow motion disabled");
-                        if (Network.IsMasterClient) {
-                            Network.SendMessageAll("slowmo_off");
-                        }
-                    }
-                } else {
+                if (!Network.IsMasterClient) {
                     Game.Print(Main._nopermission);
+                    return false;
+                }
+                if (Time.TimeScale == 1.0) {
+                    Time.TimeScale = 0.5;
+                    Game.Print("Slow motion enabled");
+                    Network.SendMessageAll("slowmo");
+                } else {
+                    Time.TimeScale = 1.0;
+                    Game.Print("Slow motion disabled");
+                    Network.SendMessageAll("slowmo_off");
                 }
                 return false;
             }
@@ -706,8 +732,6 @@ extension CommandSystem {
                 if (Network.IsMasterClient) {
                     Network.SendMessageAll("clearchat");
                     Game.Print("Cleared chat for all players.");
-                } elif (Network.MyPlayer.ID == Main.Moderator) {
-                    Network.SendMessage(Network.MasterClient, "mod:clearchat");
                 } else {
                     Game.Print(Main._nopermission);
                 }
@@ -735,7 +759,7 @@ extension CommandSystem {
             }
 
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-			# ADMIN or MODERATOR commands
+            # ADMIN commands
 
             # Tutorial replay command (for any player)
             if (cmdword == "tutorial") {
@@ -761,11 +785,15 @@ extension CommandSystem {
     }
 
     function ReviveAllPTs() {
+        # Respawn all player titans
         ptcount = 0;
         for (p in Network.Players) {
             if (p.CharacterType == "Titan") {
                 ptcount = ptcount + 1;
-                Game.SpawnPlayer(p, false);
+                if (p.Status == "Dead") {
+                    RespawnSystem.QueueRespawnWithDelay(p, Main.ReviveAllDelay);
+                    Network.SendMessageAll("ReviveAllRespawn|" + Convert.ToString(p.ID) + "|" + Convert.ToString(Main.ReviveAllDelay));
+                }
             }
         }
         if (ptcount == 0) {
@@ -776,11 +804,15 @@ extension CommandSystem {
     }
 
     function ReviveAllHumans() {
+        # Respawn all human players
         humanCount = 0;
         for (h in Network.Players) {
             if (h.CharacterType == "Human") {
                 humanCount = humanCount + 1;
-                Game.SpawnPlayer(h, false);
+                if (h.Status == "Dead") {
+                    RespawnSystem.QueueRespawnWithDelay(h, Main.ReviveAllDelay);
+                    Network.SendMessageAll("ReviveAllRespawn|" + Convert.ToString(h.ID) + "|" + Convert.ToString(Main.ReviveAllDelay));
+                }
             }
         }
         if (humanCount == 0) {
@@ -928,6 +960,7 @@ extension IdleSystem {
     _lastPosition = Vector3(0,0,0);
 
     function OnFrame() {
+        # Allow idle players to respawn on input
         if (!Main.EnableIdleSystem) {return;}
 
         if (self.IsAfk && Input.GetKeyDown("General/Forward"))
@@ -943,10 +976,12 @@ extension IdleSystem {
     }
 
     function SyncProp() {
+        # Sync AFK flag to networked properties
         Network.MyPlayer.SetCustomProperty(self.IdleProp, self.IsAfk);
     }
 
     function OnSecond(){
+        # Track idle timer and kill if inactive
         if (!Main.EnableIdleSystem) {return;}
 
         if (self.IsAfk && Network.MyPlayer.Status != "Spectate")
@@ -984,74 +1019,68 @@ extension IdleSystem {
     }
 }
 
-extension KCRevival {
-    _killCounter = 0;
-
-    function Init() { }
+extension KillToReviveSystem {
+    _humanKillCounter = 0;
+    _titanKillCounter = 0;
 
     function ResetState() {
-        self._killCounter = 0;
-        UI.SetLabel("BottomCenter", String.Newline + String.Newline + String.Newline + 
-                       String.Newline + String.Newline);
+        # Reset kill counter and clear UI
+        self._humanKillCounter = 0;
+        self._titanKillCounter = 0;
     }
 
     function OnSpawn() {
-        if (!Main.EnableKCRevivalSystem) {return;}
+        # Reset on player spawn
+        if (!Main.EnableKillToReviveSystem) {return;}
         self.ResetState();
     }
 
-    function OnDeath() {
-        if (!Main.EnableKCRevivalSystem) {return;}
-        self.ShowRevivalCount();
-    }
-
-    function ShowRevivalCount() {
-        if (!Main.EnableKCRevivalSystem) {return;}
-        if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
-        {
-            return;
-        }
-        totalKillsNeeded = Main.KillsToRevive - self._killCounter;
-        message = "<size=24>You will be revived after <color=#FF3333><b>" + 
-                    Convert.ToString(totalKillsNeeded) + "</b></color> kills</size>";
-        message += String.Newline + String.Newline + String.Newline + String.Newline;
-        UI.SetLabel("BottomCenter", message);
-    }
-
-    function OnSecond() {
-        if (!Main.EnableKCRevivalSystem) {return;}
-        if (Network.MyPlayer.Status == "Spectating")
-        {
-            UI.SetLabel("BottomCenter", String.Newline + String.Newline + String.Newline + 
-                       String.Newline + String.Newline);
-        }
-        elif (Network.MyPlayer.Status == "Dead")
-        {
-            self.ShowRevivalCount();
-        }
-        
-    }
-
-    function ProcessTitanKill(killerName, value)
+    function GetLocalTeamType()
     {
-        if (!Main.EnableKCRevivalSystem) {return;}
+        if (Network.MyPlayer == null) { return "Human"; }
+        if (Network.MyPlayer.CharacterType != null) { return Network.MyPlayer.CharacterType; }
+        if (Network.MyPlayer.Character != null) { return Network.MyPlayer.Character.Type; }
+        return "Human";
+    }
+
+    function ProcessKill(killerTeam, killerName, value)
+    {
+        # Count kills toward revival and revive when threshold reached
+        if (!Main.EnableKillToReviveSystem) {return;}
         if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
         {
             return;
         }
 
-        self._killCounter += value;
-        if (self._killCounter >= Main.KillsToRevive)
+        localTeam = self.GetLocalTeamType();
+        if (localTeam != killerTeam) {
+            return;
+        }
+
+        if (localTeam == "Human") {
+            self._humanKillCounter += value;
+            current = self._humanKillCounter;
+        } else {
+            self._titanKillCounter += value;
+            current = self._titanKillCounter;
+        }
+
+        killsNeeded = Main.KillsToReviveHuman;
+        if (localTeam == "Titan") {
+            killsNeeded = Main.KillsToReviveTitan;
+        }
+        if (current >= killsNeeded)
         {
-            self.ResetState();
+            if (localTeam == "Human") {
+                self._humanKillCounter = 0;
+            } else {
+                self._titanKillCounter = 0;
+            }
             Game.SpawnPlayer(Network.MyPlayer, false);
 
             UI.SetLabelForTime("MiddleCenter", 
                 "<size=30><color=#33FF33>You have been revived by " + 
                 "<b>" + killerName + "</b></color></size>", 5.0);
-        }
-        else {
-            self.ShowRevivalCount();
         }
     }
 }
@@ -1068,6 +1097,7 @@ extension RespawnSystem {
     respawn_timer_keys = new List();
 
     function OnSecond() {
+        # Tick down respawn timers and spawn when ready
         if (!Main.EnableRespawnSystem) {return;}
 
         # Initialize/reset if needed
@@ -1126,6 +1156,7 @@ extension RespawnSystem {
     }
 
     function GetHumanRespawnDelay() {
+        # Calculate human respawn delay (with overrides)
         # Admin override takes priority
         if (Main.ManualHumanTimer != null && Convert.ToFloat(Main.ManualHumanTimer) > 0) {
             return Convert.ToFloat(Main.ManualHumanTimer);
@@ -1145,6 +1176,7 @@ extension RespawnSystem {
     }
 
     function GetTitanRespawnDelay() {
+        # Calculate titan respawn delay (with overrides)
         # Check for admin override first
         if (Main.ManualTitanTimer != null && Convert.ToFloat(Main.ManualTitanTimer) > 0) {
             return Convert.ToFloat(Main.ManualTitanTimer);
@@ -1165,6 +1197,7 @@ extension RespawnSystem {
     }
 
     function QueueRespawn(victim) {
+        # Queue a respawn timer for a dead player
         if (!Main.EnableRespawnSystem) {return;}
 
         # Determine team prefix (H- for human, T- for titan)
@@ -1199,7 +1232,37 @@ extension RespawnSystem {
         }
     }
 
+    function QueueRespawnWithDelay(player, delay) {
+        # Queue a respawn timer with a fixed delay (used by admin revive commands)
+        if (!Main.EnableRespawnSystem) {return;}
+        if (player == null) {return;}
+
+        teamPrefix = "T-";
+        if (player.CharacterType == "Human") {
+            teamPrefix = "H-";
+        }
+
+        playerIDstr = Convert.ToString(player.ID);
+        if (String.Length(playerIDstr) == 0) {
+            Game.Print("[ERROR] Invalid player ID");
+            return;
+        }
+        storeKey = teamPrefix + playerIDstr;
+
+        if (delay == null) {return;}
+        delayValue = Math.Max(Convert.ToFloat(delay), 0.0);
+
+        self.respawn_timers.Set(storeKey, delayValue);
+        if (self.respawn_timer_keys == null) {
+            self.respawn_timer_keys = new List();
+        }
+        if (!self.respawn_timer_keys.Contains(storeKey)) {
+            self.respawn_timer_keys.Add(storeKey);
+        }
+    }
+
     function UpdateRespawnUI() {
+        # Show respawn timer UI for local player
         if (!Main.EnableRespawnSystem) {return;}
         
         # Get local player's status
@@ -1225,15 +1288,6 @@ extension RespawnSystem {
             message = "<size=24><color=#FF5555>RESPAWN IN: ";
             message += Convert.ToString(timeLeft) + " SECONDS</color></size>";
             
-            # Show different messages based on team
-            if (localPlayer.CharacterType == "Human") {
-                message += String.Newline + "<size=18><color=#AAAAAA>Human respawn scaling: ";
-                message += Convert.ToString(self.RespawnHumanScale) + "x</color></size>";
-            } else {
-                message += String.Newline + "<size=18><color=#AAAAAA>Titan respawn scaling: ";
-                message += Convert.ToString(self.RespawnTitanScale) + "x</color></size>";
-            }
-            
             UI.SetLabel("BottomCenter", message);
         } else {
             UI.SetLabel("BottomCenter", 
@@ -1251,6 +1305,7 @@ extension ScoreSystem {
     _TitanScore = 0;
     
     function UpdateScore(x, iskiller, damage, restarting) {
+        # Update kills/deaths and damage stats
         if (!Main.EnableScoreSystem) {return;}
         # Only update stats if not during game restart
         if (restarting == false) {
@@ -1293,6 +1348,7 @@ extension ScoreSystem {
     }
     
     function ResetKD(x) {
+        # Reset player stats and clear persisted values
         x.Kills = 0;
         x.Deaths = 0;
         x.HighestDamage = 0;
@@ -1309,6 +1365,7 @@ extension ScoreSystem {
     }
     
     function HandleWinSync(message) {
+        # Sync win counts from network message
         if (String.StartsWith(message, "WinSync:")) {
             # Extract the data part after "WinSync:"
             dataStr = String.Substring(message, 8);
@@ -1341,12 +1398,14 @@ extension ScoreSystem {
     
     # Safe float conversion with null checking
     function f(inp) {
+        # Ensure numeric conversion is always valid
         return Convert.ToFloat(inp);
     }
 }
 
 extension TeamSystem {
     function UpdateTeamUI() {
+        # Update top-center team UI labels
         if (!Main.EnableTeamSystem) {return;}
         TeamScore = "";
         if (Main.ShowTeamScore) {
@@ -1364,6 +1423,7 @@ extension TeamSystem {
     }
     
     function TeamHeader(player) {
+        # Build colored header for kill feed
         prefix = "";
         aiColour = "#AAAAAA";
         tColour = "#FFE14C";
@@ -1382,14 +1442,17 @@ extension TeamSystem {
     }
 
     function TeamHeaderText(tag, colour, text) {
+        # Format team header with tag and color
         return "<b><color='" + colour + "'>(" + tag + ")</color></b> " + text;
     }
 
     function RockHeader(killerName) {
+        # Header for rock kills
         return self.TeamHeaderText("R", "#AAAAAA", killerName);
     }
 
     function CheckVictoryConditions() {
+        # Check and process win conditions
         if (!Main.EnableTeamSystem) {return;}
         # Case 1: All humans dead - Titans win
         if (Game.PlayerHumans.Count == 0) {
@@ -1460,6 +1523,7 @@ extension TitanJumpCooldown {
     _action = List();
     
     function Init() {
+        # Initialize jump cooldown state
         # Initialize jump cooldown from Main config
         self._jumpKeyEnabled = true;
         self._jumpRoundTime = 0;
@@ -1467,6 +1531,7 @@ extension TitanJumpCooldown {
     }
     
     function OnFrame() {
+        # Monitor jump animations and disable input
         if (!Main.EnableTitanJumpCooldown) { return; }
         
         character = Network.MyPlayer.Character;
@@ -1476,7 +1541,7 @@ extension TitanJumpCooldown {
                 character.CurrentAnimation == "Amarture_VER2|attack.jumper.0") {
                 self._action.Add(character.CurrentAnimation);
                 self._jumpKeyEnabled = false;
-                self.DelayJump(Main.JumpCD);
+                self.DelayJump(Main.JumpCoolDown);
             }
             
             # Handle post-jump actions
@@ -1494,6 +1559,7 @@ extension TitanJumpCooldown {
     }
     
     function OnSecond() {
+        # Decrease cooldown timer
         if (!Main.EnableTitanJumpCooldown) { return; }
         
         # Update cooldown timer
@@ -1503,6 +1569,7 @@ extension TitanJumpCooldown {
     }
     
     coroutine DelayJump(seconds) {
+        # Wait and then re-enable jump input
         self._jumpRoundTime = seconds;
         wait seconds;
         
@@ -1516,39 +1583,29 @@ extension TitanJumpCooldown {
 
 extension PlayerTitanStats {
     function ApplyStats(character) {
-        # Only apply if: 
-        # 1. Is a Titan
-        # 2. Is a PLAYER (not AI)
-
+        # Apply configurable titan stats
         self.TitanStamina = Main.TitanStamina;
         self.TitanMaxStamina = Main.TitanMaxStamina;
         self.TitanAttackPause = Main.TitanAttackPause;
         self.TitanAttackSpeed = Main.TitanAttackSpeed;
 
-        if (Network.MyPlayer.Character != null && 
-            Network.MyPlayer.Character.Type == "Titan" && 
-            !Network.MyPlayer.Character.IsAI) 
-            {
-                Network.MyPlayer.Character.Stamina = self.TitanStamina;
-                Network.MyPlayer.Character.MaxStamina = self.TitanMaxStamina; 
-                Network.MyPlayer.Character.AttackPause = self.TitanAttackPause;
-                Network.MyPlayer.Character.AttackSpeedMultiplier = self.TitanAttackSpeed;
-            }
+        if (character != null &&
+            character.Type == "Titan" &&
+            character.IsMine &&
+            !character.IsAI)
+        {
+            character.Stamina = self.TitanStamina;
+            character.MaxStamina = self.TitanMaxStamina;
+            character.AttackPause = self.TitanAttackPause;
+            character.AttackSpeedMultiplier = self.TitanAttackSpeed;
+
+        }
     }
 
     function OnCharacterSpawn(character) {
-        self.ApplyStats(Network.MyPlayer.Character);
+        # Apply stats on spawn
+        self.ApplyStats(character);
     }
-
-    # function OnSecond() {
-    #     # Only apply to local player's titan
-    #     if (Network.MyPlayer != null && 
-    #         Network.MyPlayer.Character != null &&
-    #         Network.MyPlayer.Character.Type == "Titan")
-    #     {
-    #         self.ApplyStats(Network.MyPlayer.Character);
-    #     }
-    # }
 }
 
 #======================================================================
