@@ -113,7 +113,7 @@ class Main {
 
 # UI State
     _rulesPopupCreated = false;
-    _debugPopupCreated = false;
+    # _debugPopupCreated removed (debug popup removed)
 
 # Permission Messages
     _nopermission = "<color='#CC0000'>Error: You do not have permission!</color>";
@@ -797,15 +797,16 @@ extension NetworkSystem {
 extension UISystem {
     
     _rulesPopupCreated = false;
-    _debugPopupCreated = false;
+    # _debugPopupCreated removed (debug popup removed)
+    _adminRulesPopupCreated = false;
 
     function HandleButtonClick(buttonName) {
         # Route popup button actions
         if (buttonName == "CloseRules") {
             UI.HidePopup("RulesPopup");
         }
-        elif (buttonName == "CloseDebug") {
-            UI.HidePopup("DebugPopup");
+        elif (buttonName == "CloseAdminRules") {
+            UI.HidePopup("AdminRulesPopup");
         }
     }
 
@@ -816,37 +817,68 @@ extension UISystem {
         # 1. Create popup container (same dimensions)
         UI.CreatePopup("RulesPopup", "Original Gamemode PvT - GUIDELINES", 900, 700);
         
-        # 2. Header (identical to original)
+        # 2. Header (original + balance note)
         UI.AddPopupLabel("RulesPopup", 
             "<color=#AAAAAA>These guidelines help maintain balanced gameplay. " +
             String.Newline +
             "Host may adjust rules to ensure everyone is having fun!</color>" + 
             String.Newline + String.Newline +
+            "<color=#AAAAAA>This mode is actively tweaking and adapting to game state & META to keep things fun and balanced.</color>" +
+            String.Newline + String.Newline +
             "<size=24><color=#FF5555>WEAPON RESTRICTIONS</color></size>");
         
-        # 3. Weapon rules (original formatting)
+        # 3. Weapon rules (original formatting + AHSS note)
         UI.AddPopupLabel("RulesPopup", 
-            "<color=#FF9999>NO APG/AHSS/TS weapons allowed (OP Against PTs)</color>" + 
+            "<color=#FF9999>NO APG/TS weapons allowed (OP Against PTs)</color>" + 
             String.Newline + 
-            "  <size=16><i>(Will be enabled in future updates)</i></size>");
+            "<size=16><i>may change if balance shifts</i></size>" +
+            String.Newline +
+            "<size=24><color=#66CCFF>AHSS is optional and can be unlocked.</color></size>");
         
-        # 4. Respawn rules (original colors)
+        # 4. Respawn rules (original colors + updates)
         UI.AddPopupLabel("RulesPopup", 
             String.Newline + "<size=24><color=#55FF55>RESPAWN</color></size>" +
             String.Newline +
-            "Base respawn: <color=#FFFF00>60 seconds</color>" +
+            "Base respawn: <color=#FFFF00>" + Convert.ToInt(Main._BaseRespawnTime) + " seconds</color>" +
             String.Newline +
-            "Adjusted down to <color=#FFFF00>30s minimum</color> for disadvantaged teams");
+            "Adjusted down to <color=#FFFF00>" + Convert.ToInt(Main._MinRespawnTime) + "s minimum</color> for disadvantaged teams" +
+            String.Newline +
+            "<color=#FFAA00>Final 1v1:</color> All respawns locked");
 
-        # 5. Titan abilities (original styling)
+        # 5. Titan abilities (updated rock throw note)
         UI.AddPopupLabel("RulesPopup", 
             String.Newline + "<size=24><color=#FFAA00>TITAN ABILITIES</color></size>" +
             String.Newline +
-            "<color=#FFCC00>Rock throw limited to 2 PTs max</color>" +
+            "<color=#FFCC00>Rock throw usually 2 PTs</color>" +
             String.Newline +
-            "Throwers chosen randomly each round" +
+            "Host may allow more depending on balance (max usually 4)");
+
+        # 6. Kill-to-revive + Titan stats
+        UI.AddPopupLabel("RulesPopup",
+            String.Newline + "<size=24><color=#FF55FF>KILL TO REVIVE</color></size>" +
             String.Newline +
-            "<size=16><i>(Host may occasionally allow 3PT)</i></size>");
+            "Humans revive after <color=#FFFF00>" + Convert.ToString(Main.KillsToReviveHuman) + "</color> kills" +
+            String.Newline +
+            "Titans revive after <color=#FFFF00>" + Convert.ToString(Main.KillsToReviveTitan) + "</color> kills" +
+            String.Newline + String.Newline +
+            "<size=24><color=#FFCC00>TITAN STATS</color></size>" +
+            String.Newline +
+            "AtkSpeed " + Convert.ToString(Main._TitanAttackSpeed) +
+            " | Stamina " + Convert.ToString(Main._TitanStamina) + "/" + Convert.ToString(Main._TitanMaxStamina) +
+            " | Pause " + Convert.ToString(Main._TitanAttackPause) +
+            " | JumpCD " + Convert.ToString(Main._JumpCoolDown)
+        );
+
+        # 7. Tips / commands (short)
+        UI.AddPopupLabel("RulesPopup",
+            String.Newline + "<size=24><color=#00CCFF>TIPS</color></size>" +
+            String.Newline +
+            "Humans: focus one PT at a time" + String.Newline +
+            "Titans: push together, don't fight alone" + String.Newline +
+            String.Newline +
+            "<size=24><color=#00CCFF>COMMANDS</color></size>" + String.Newline +
+            "#adminrules | #rules  |  #tutorial"
+        );
         
         # 6. Close button (identical implementation)
         UI.AddPopupBottomButton("RulesPopup", "CloseRules", 
@@ -855,17 +887,6 @@ extension UISystem {
         self._rulesPopupCreated = true;
     }
 
-    function CreateDebugPopup() {
-        # Build the debug popup UI once
-        if (self._debugPopupCreated) {return;}
-        
-        UI.CreatePopup("DebugPopup", "Original Gamemode PvT - GUIDELINES", 900, 700);
-        UI.AddPopupLabel("DebugPopup", Game.Loadouts + " - Debug Mode");
-        UI.AddPopupBottomButton("DebugPopup", "CloseDebug", 
-            UI.WrapStyleTag("UNDERSTOOD", "color", "#FFFFFF"));
-        
-        self._debugPopupCreated = true;
-    }
 
     function ShowRulesPopup() {
         # Lazy-create then show rules popup
@@ -875,12 +896,53 @@ extension UISystem {
         UI.ShowPopup("RulesPopup");
     }
 
-    function ShowDebugPopup() {
-        # Lazy-create then show debug popup
-        if (!self._debugPopupCreated) {
-            self.CreateDebugPopup();
+    function CreateAdminRulesPopup() {
+        if (self._adminRulesPopupCreated) {return;}
+
+        UI.CreatePopup("AdminRulesPopup", "PvT - ADMIN RULES", 900, 800);
+
+        # Admin commands (non-debug)
+        UI.AddPopupLabel("AdminRulesPopup",
+            "<size=24><color=#FFAA00>ADMIN COMMANDS</color></size>" + String.Newline +
+            "• #resetkdall" + String.Newline +
+            "• #reviveall" + String.Newline +
+            "• #reviveallpt" + String.Newline +
+            "• #reviveallhumans" + String.Newline +
+            "• #setwins <human> <titan>" + String.Newline +
+            "• #mode (toggle FullClear)" + String.Newline +
+            "• #slowmo (toggle)" + String.Newline +
+            "• #clearchat"
+        );
+
+        # Hidden settings (underscore)
+        settings = "<size=24><color=#55FF55>HIDDEN SETTINGS</color></size>" + String.Newline +
+            "RespawnHumanScale: " + Convert.ToString(Main._RespawnHumanScale) + String.Newline +
+            "RespawnTitanScale: " + Convert.ToString(Main._RespawnTitanScale) + String.Newline +
+            "ReviveAllDelay: " + Convert.ToString(Main._ReviveAllDelay) + String.Newline +
+            "IdleKillTime: " + Convert.ToString(Main._IdleKillTime) + String.Newline +
+            "IdleRespawn: " + Convert.ToString(Main._IdleRespawn) + String.Newline +
+            "SlowMode: " + Convert.ToString(Main._SlowMode) + String.Newline +
+            "TitanAttackSpeed: " + Convert.ToString(Main._TitanAttackSpeed) + String.Newline +
+            "TitanMaxStamina: " + Convert.ToString(Main._TitanMaxStamina) + String.Newline +
+            "TitanStamina: " + Convert.ToString(Main._TitanStamina) + String.Newline +
+            "TitanAttackPause: " + Convert.ToString(Main._TitanAttackPause) + String.Newline +
+            "JumpCoolDown: " + Convert.ToString(Main._JumpCoolDown) + String.Newline +
+            "BaseRespawnTime: " + Convert.ToString(Main._BaseRespawnTime) + String.Newline +
+            "MinRespawnTime: " + Convert.ToString(Main._MinRespawnTime);
+
+        UI.AddPopupLabel("AdminRulesPopup", String.Newline + settings);
+
+        UI.AddPopupBottomButton("AdminRulesPopup", "CloseAdminRules",
+            UI.WrapStyleTag("CLOSE", "color", "#FFFFFF"));
+
+        self._adminRulesPopupCreated = true;
+    }
+
+    function ShowAdminRulesPopup() {
+        if (!self._adminRulesPopupCreated) {
+            self.CreateAdminRulesPopup();
         }
-        UI.ShowPopup("DebugPopup");
+        UI.ShowPopup("AdminRulesPopup");
     }
 
     
@@ -1115,14 +1177,6 @@ extension CommandSystem {
                 return false;
             }
 
-            # Show debug popup 
-            if (!Network.IsMasterClient) {
-                Game.Print("<color='#CC0000'>Error: You are not the MasterClient!</color>");
-            } elif (cmdword == "debug") {
-                UISystem.ShowDebugPopup();
-                return false;
-            }
-
             # Command for testing sync messages
             if (cmdword == "testsync") {
                 if (!Network.IsMasterClient) {return false;}
@@ -1148,6 +1202,14 @@ extension CommandSystem {
             # Show rule popup
             if (cmdword == "rules") {
                 UISystem.ShowRulesPopup();  # ← Use this instead of direct UI.ShowPopup()
+                return false;
+            }
+            if (cmdword == "adminrules") {
+                if (!Network.IsMasterClient) {
+                    Game.Print(Main._nopermission);
+                    return false;
+                }
+                UISystem.ShowAdminRulesPopup();
                 return false;
             }
 
