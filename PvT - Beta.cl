@@ -56,7 +56,7 @@ class Main {
     _nopermission = "<color='#CC0000'>Error: You do not have permission!</color>";
 
     # Special Abilities
-    AuthorizedRockThrower = "";
+    AuthorizedRockThrower = "1";
     AuthorizedRockThrowerTooltip = "Player IDs separated by hyphens (1-2-3) who can throw rocks as Titans.";
 
     # Movement Tracking
@@ -96,11 +96,11 @@ class Main {
     SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
 
     # Default values - change these to adjust titan behavior
-    TitanAttackSpeed = 1.0;
-    TitanMaxStamina = 3; 
-    TitanAttackWait = 0.1;
+    TitanAttackSpeed = 5;
+    TitanMaxStamina = 10; 
+    TitanStamina = 10; 
+    TitanAttackPause = 0.1;
     JumpCD = 4.0;  # Cooldown in seconds
-
 
     /*===== INITIALIZATION =====*/
     function Init() {
@@ -133,9 +133,9 @@ class Main {
             RockThrowSystem.Init();
         }
         
-        if (Main.EnableAHSSUnlockSystem) {
-            AHSSUnlockSystem.Initialize();
-        }
+        # if (Main.EnableAHSSUnlockSystem) {
+        #     AHSSUnlockSystem.Initialize();
+        # }
         
         if (Main.EnableKCRevivalSystem) {
             KCRevival.Init();
@@ -145,26 +145,20 @@ class Main {
             TitanJumpCooldown.Init();
         }
 
-        PlayerTitanStats.AttackSpeedMultiplier = Main.TitanAttackSpeed;
-        PlayerTitanStats.MaxStamina = Main.TitanMaxStamina;
-        PlayerTitanStats.AttackWait = Main.TitanAttackWait;
-        
         # Always configure UI basics
         UI.SetLabel("MiddleCenter", "");
         Game.DefaultShowKillFeed = false;
-        Game.DefaultShowKillScore = false;
+        Game.DefaultHideKillScore = false;
         Game.DefaultAddKillScore = false;
-        UI.SetScoreboardProperty("KDRA");
+        UI.SetScoreboardProperty("KDRS");
         UI.SetScoreboardHeader("Kills / Deaths / Max / Total");
 
         player = Network.MyPlayer;
-        player.SetCustomProperty("KDRA", 
+        player.SetCustomProperty("KDRS", 
             player.Kills + " / " + player.Deaths + 
             " / " + player.HighestDamage + " / " + player.TotalDamage
         );
 
-        
-        
         if (!RoomData.GetProperty("tutorial_shown", false)) {
             Cutscene.Start("PvTQuickStart", true);
             RoomData.SetProperty("tutorial_shown", true);
@@ -186,7 +180,6 @@ class Main {
         if (Main.EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnFrame();
         }
-        PlayerTitanStats.OnFrame();
     }
 
     function OnSecond() {
@@ -197,6 +190,8 @@ class Main {
         if (Main.EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnSecond();
         }
+        # PlayerTitanStats.OnSecond();
+
     }
 
     function OnCharacterSpawn(character) {
@@ -211,7 +206,7 @@ class Main {
     }
 
     function OnCharacterDie(victim, killer, killerName) {
-        if (Main.EnableAHSSUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);}
+        # if (Main.EnableAHSSUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName);}
         if (Main.EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName);}
     }   
 
@@ -252,7 +247,7 @@ extension MovementSystem {
 extension DamageSystem {
     function HandleDamage(victim, killer, killerName, damage) {
         if (!Main.EnableDamageSystem) {return;}
-
+        
         # Basic validation
         if (victim == null || victim.Health > 0 || victim.Player == null) {
             return;
@@ -262,7 +257,6 @@ extension DamageSystem {
             RespawnSystem.QueueRespawn(victim);
         }
             
-        
         # Human killer case
         if (killerName != "Rock" && killer != null && killer.Type == "Human") {
             self.HandleHumanKiller(victim, killer, killerName, damage);
@@ -274,7 +268,7 @@ extension DamageSystem {
         }
         
         # Rock kill case
-        if (killerName == "Rock") {
+        if (killer == null && String.EndsWith(killerName, "'s Rock")) {
             self.HandleRockKill(victim, killer, killerName, damage);
         }
     }
@@ -325,7 +319,7 @@ extension DamageSystem {
             damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
             
             Game.ShowKillFeedAll(
-                "<b><color='#ff0000'>ROCK</color></b>",
+                TeamSystem.RockHeader(killerName),
                 TeamSystem.TeamHeader(victim),
                 damage,
                 "Titan"
@@ -675,7 +669,6 @@ extension CommandSystem {
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 			# ADMIN or MODERATOR commands
 
-        
             # Tutorial replay command (for any player)
             if (cmdword == "tutorial") {
                 Cutscene.Start("PvTQuickStart", true);
@@ -730,132 +723,132 @@ extension CommandSystem {
     }
 }
 
-extension AHSSUnlockSystem {
-    # Configuration - adjust these values as needed
-    PointsForAHSS = 15;
-    AITitanPointValue = 1;
-    PlayerTitanPointValue = 5;
-    _ahssConfirmationEnabled = true;
+# extension AHSSUnlockSystem {
+#     # Configuration - adjust these values as needed
+#     PointsForAHSS = 15;
+#     AITitanPointValue = 1;
+#     PlayerTitanPointValue = 5;
+#     _ahssConfirmationEnabled = true;
     
-    # State tracking
-    PlayerData = Dict();
-    _ahssUnlocker = null;
-    _ahssUnlocked = false;
+#     # State tracking
+#     PlayerData = Dict();
+#     _ahssUnlocker = null;
+#     _ahssUnlocked = false;
     
-    # Initialization
-    function Initialize()
-    {
-        self.PlayerData.Clear();
-        self._ahssUnlocker = null;
-        self._ahssUnlocked = false;
-    }
+#     # Initialization
+#     function Initialize()
+#     {
+#         self.PlayerData.Clear();
+#         self._ahssUnlocker = null;
+#         self._ahssUnlocked = false;
+#     }
     
-    # Core functionality
-    function ProcessTitanKill(victim, killer, killerName) {
-        if (!Main.EnableAHSSUnlockSystem) {return false;}
-        if (victim == null || killer == null || killer.Type != "Human") {return false;}
+#     # Core functionality
+#     function ProcessTitanKill(victim, killer, killerName) {
+#         if (!Main.EnableAHSSUnlockSystem) {return false;}
+#         if (victim == null || killer == null || killer.Type != "Human") {return false;}
         
-        playerName = killer.Name;
-        currentData = self.GetPlayerData(playerName);
+#         playerName = killer.Name;
+#         currentData = self.GetPlayerData(playerName);
         
-        # Block if already unlocked by someone else
-        if (self._ahssUnlocked && playerName != self._ahssUnlocker) {return false;}
+#         # Block if already unlocked by someone else
+#         if (self._ahssUnlocked && playerName != self._ahssUnlocker) {return false;}
         
-        # Calculate points
-        if (victim.IsAI) {
-            pointsToAdd = self.AITitanPointValue;
-        }
-        else {
-             pointsToAdd = self.PlayerTitanPointValue;
-        }
-            newPoints = currentData.Get("points") + pointsToAdd;
-            currentData.Set("points", newPoints);
+#         # Calculate points
+#         if (victim.IsAI) {
+#             pointsToAdd = self.AITitanPointValue;
+#         }
+#         else {
+#              pointsToAdd = self.PlayerTitanPointValue;
+#         }
+#             newPoints = currentData.Get("points") + pointsToAdd;
+#             currentData.Set("points", newPoints);
         
-        # Check for unlock
-        if (!self._ahssUnlocked && newPoints >= self.PointsForAHSS && !currentData.Get("unlocked"))
-        {
-            currentData.Set("unlocked", true);
-            return self.HandleUnlock(killer, playerName);
-        }
+#         # Check for unlock
+#         if (!self._ahssUnlocked && newPoints >= self.PointsForAHSS && !currentData.Get("unlocked"))
+#         {
+#             currentData.Set("unlocked", true);
+#             return self.HandleUnlock(killer, playerName);
+#         }
         
-        self.UpdatePlayerCounter(playerName, newPoints);
-        return false;
-    }
+#         self.UpdatePlayerCounter(playerName, newPoints);
+#         return false;
+#     }
     
-    # Helper functions
-    function GetPlayerData(playerName) {
-        if (!self.PlayerData.Contains(playerName))
-        {
-            data = Dict();
-            data.Set("points", 0.0);
-            data.Set("unlocked", false);
-            self.PlayerData.Set(playerName, data);
-        }
-        return self.PlayerData.Get(playerName);
-    }
+#     # Helper functions
+#     function GetPlayerData(playerName) {
+#         if (!self.PlayerData.Contains(playerName))
+#         {
+#             data = Dict();
+#             data.Set("points", 0.0);
+#             data.Set("unlocked", false);
+#             self.PlayerData.Set(playerName, data);
+#         }
+#         return self.PlayerData.Get(playerName);
+#     }
     
-    function UpdatePlayerCounter(playerName, points)
-    {
-        if (self._ahssUnlocked) {return;}
+#     function UpdatePlayerCounter(playerName, points)
+#     {
+#         if (self._ahssUnlocked) {return;}
         
-        formattedPoints = String.FormatFloat(points, 1);
-        text = playerName + ": " + formattedPoints + "/" + self.PointsForAHSS;
-        UI.SetLabelAll("TopRight", text);
-    }
+#         formattedPoints = String.FormatFloat(points, 1);
+#         text = playerName + ": " + formattedPoints + "/" + self.PointsForAHSS;
+#         UI.SetLabelAll("TopRight", text);
+#     }
     
-    function HandleUnlock(character, playerName)
-    {
-        self._ahssUnlocked = true;
-        self._ahssUnlocker = playerName;
+#     function HandleUnlock(character, playerName)
+#     {
+#         self._ahssUnlocked = true;
+#         self._ahssUnlocker = playerName;
         
-        UI.SetLabelAll("TopRight", "");
-        UI.SetLabelAll("TopCenter", "AHSS Unlocked!");
+#         UI.SetLabelAll("TopRight", "");
+#         UI.SetLabelAll("TopCenter", "AHSS Unlocked!");
         
-        if (self._ahssConfirmationEnabled && character.IsMine)
-        {
-            self.StartConfirmation(character);
-        }
-        else
-        {
-            self.ActivateAHSS(character);
-        }
+#         if (self._ahssConfirmationEnabled && character.IsMine)
+#         {
+#             self.StartConfirmation(character);
+#         }
+#         else
+#         {
+#             self.ActivateAHSS(character);
+#         }
         
-        return true;
-    }
+#         return true;
+#     }
     
-    coroutine StartConfirmation(character)
-    {
-        UI.SetLabelForTime("TopRight", "Hold <color=yellow>'Reload'</color> to unlock AHSS", 5);
+#     coroutine StartConfirmation(character)
+#     {
+#         UI.SetLabelForTime("TopRight", "Hold <color=yellow>'Reload'</color> to unlock AHSS", 5);
         
-        while (!Input.GetKeyHold("Human/Reload"))
-        {
-            wait 0.1;
-        }
+#         while (!Input.GetKeyHold("Human/Reload"))
+#         {
+#             wait 0.1;
+#         }
         
-        self.ActivateAHSS(character);
-    }
+#         self.ActivateAHSS(character);
+#     }
     
-    function ActivateAHSS(character)
-    {
-        if (character.Type != "Human") {return;}
+#     function ActivateAHSS(character)
+#     {
+#         if (character.Type != "Human") {return;}
         
-        character.SetWeapon("AHSS");
-        character.CurrentAmmoRound = 2;
-        character.CurrentAmmoLeft = 3;
-        character.MaxAmmoRound = 2;
-        character.MaxAmmoTotal = 3;
+#         character.SetWeapon("AHSS");
+#         character.CurrentAmmoRound = 2;
+#         character.CurrentAmmoLeft = 3;
+#         character.MaxAmmoRound = 2;
+#         character.MaxAmmoTotal = 3;
         
-        if (character.IsMine)
-        {
-            character.PlaySound("AHSSGunShotDouble2");
-        }
+#         if (character.IsMine)
+#         {
+#             character.PlaySound("AHSSGunShotDouble2");
+#         }
         
-        if (Network.IsMasterClient)
-        {
-            Game.PrintAll(character.Name + " has unlocked AHSS!");
-        }
-    }
-}
+#         if (Network.IsMasterClient)
+#         {
+#             Game.PrintAll(character.Name + " has unlocked AHSS!");
+#         }
+#     }
+# }
 
 extension IdleSystem {
     AfkKillTime = 60;
@@ -1289,13 +1282,13 @@ extension TeamSystem {
         if (!Main.EnableTeamSystem) {return;}
         TeamScore = "";
         if (Main.ShowTeamScore) {
-            TeamScore = String.Newline + "<size=20><color='#5F8DE7'>" + Main.TeamOneName + ": " + ScoreSystem._HumanScore + "</color> | " + "<color='#FFE14C'>" + Main.TeamTwoName + ": " + ScoreSystem._TitanScore + "</color></size>";
+            TeamScore = String.Newline + "<size=20><color='#fe0000'>" + Main.TeamOneName + ": " + ScoreSystem._HumanScore + "</color> | " + "<color='#FFE14C'>" + Main.TeamTwoName + ": " + ScoreSystem._TitanScore + "</color></size>";
         }
 
         UI.SetLabel("TopCenter",
             "<color='#00ccff'><b>»</b> <color='white'>Player vs Titan</color> <b>«</b></color>"
             + String.Newline
-            + "<b><color='#5F8DE7'>H</color></b> " + Game.PlayerHumans.Count
+            + "<b><color='#fe0000'>H</color></b> " + Game.PlayerHumans.Count
             + " | <b><color='#AAAAAA'>AI</color></b> " + Game.AITitans.Count
             + " | <b><color='#FFE14C'>T</color></b> " + Game.PlayerTitans.Count
             + TeamScore
@@ -1306,7 +1299,7 @@ extension TeamSystem {
         prefix = "";
         aiColour = "#AAAAAA";
         tColour = "#FFE14C";
-        hColour = "#5F8DE7";
+        hColour = "#f06262";
         
         if (player.Type == "Titan") {
             if (player.IsAI) {
@@ -1319,7 +1312,15 @@ extension TeamSystem {
         }
         return prefix + player.Name;
     }
-    
+
+    function TeamHeaderText(tag, colour, text) {
+        return "<b><color='" + colour + "'>(" + tag + ")</color></b> " + text;
+    }
+
+    function RockHeader(killerName) {
+        return self.TeamHeaderText("R", "#AAAAAA", killerName);
+    }
+
     function CheckVictoryConditions() {
         if (!Main.EnableTeamSystem) {return;}
         # Case 1: All humans dead - Titans win
@@ -1451,34 +1452,36 @@ extension PlayerTitanStats {
         # 1. Is a Titan
         # 2. Is a PLAYER (not AI)
 
-    AttackSpeedMultiplier = Main.TitanAttackSpeed;
-    MaxStamina = Main.TitanMaxStamina;
-    AttackWait = Main.TitanAttackWait;
-        if (character != null && 
-            character.Type == "Titan" && 
-            !character.IsAI) 
-        {
-            character.AttackSpeedMultiplier = self.AttackSpeedMultiplier;
-            character.MaxStamina = self.MaxStamina; 
-            character.AttackWait = self.AttackWait;
-        }
+        self.TitanStamina = Main.TitanStamina;
+        self.TitanMaxStamina = Main.TitanMaxStamina;
+        self.TitanAttackPause = Main.TitanAttackPause;
+        self.TitanAttackSpeed = Main.TitanAttackSpeed;
+
+        if (Network.MyPlayer.Character != null && 
+            Network.MyPlayer.Character.Type == "Titan" && 
+            !Network.MyPlayer.Character.IsAI) 
+            {
+                Network.MyPlayer.Character.Stamina = self.TitanStamina;
+                Network.MyPlayer.Character.MaxStamina = self.TitanMaxStamina; 
+                Network.MyPlayer.Character.AttackPause = self.TitanAttackPause;
+                Network.MyPlayer.Character.AttackSpeedMultiplier = self.TitanAttackSpeed;
+            }
     }
 
     function OnCharacterSpawn(character) {
-        self.ApplyStats(character);
+        self.ApplyStats(Network.MyPlayer.Character);
     }
 
-    function OnFrame() {
-        # Only apply to local player's titan
-        if (Network.MyPlayer != null && 
-            Network.MyPlayer.Character != null &&
-            Network.MyPlayer.Character.Type == "Titan")
-        {
-            self.ApplyStats(Network.MyPlayer.Character);
-        }
-    }
+    # function OnSecond() {
+    #     # Only apply to local player's titan
+    #     if (Network.MyPlayer != null && 
+    #         Network.MyPlayer.Character != null &&
+    #         Network.MyPlayer.Character.Type == "Titan")
+    #     {
+    #         self.ApplyStats(Network.MyPlayer.Character);
+    #     }
+    # }
 }
-
 
 #======================================================================
 # TUTORIAL CUTSCENE
