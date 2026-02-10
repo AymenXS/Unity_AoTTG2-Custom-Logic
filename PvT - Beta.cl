@@ -297,17 +297,25 @@ extension DamageSystem {
         if (victim.Name == Network.MyPlayer.Name) {
             # Calculate velocity-based damage
             damage = MovementSystem.lastMagnitudes.Get("mag-"+victim.Player.ID, 5.0) * 10.0 + 1;
-            # damage = Network.MyPlayer.Character.Velocity.Magnitude * Main.DamageMultiplier;
-            
+
+            killerHeader = TeamSystem.TeamHeader(killer);
+
+            anim = killer.CurrentAnimation;
+
+            # Match the real jump-attack clip name
+            if (String.Contains(anim, "attack.jumper")) {
+                killerHeader = killerHeader + "'s NOM";
+            }
+
             Game.ShowKillFeedAll(
-                TeamSystem.TeamHeader(killer),
+                killerHeader,
                 TeamSystem.TeamHeader(victim),
                 damage,
                 "Titan"
             );
             ScoreSystem.UpdateScore(victim.Player, false, 0, false);
         }
-        
+
         if (killer.Name == Network.MyPlayer.Name) {
             ScoreSystem.UpdateScore(killer.Player, true, Convert.ToInt(damage), false);
         }
