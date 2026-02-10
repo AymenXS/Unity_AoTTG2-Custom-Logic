@@ -77,11 +77,17 @@ class Main {
     AuthorizedRockThrower = "1";
     AuthorizedRockThrowerTooltip = "Player IDs separated by hyphens (1-2-3) who can throw rocks as Titans.";
 
-# Kill To Revive System
+    # Kill To Revive System
     EnableKillToReviveSystem = true;
 
     KillsToReviveHuman = 10;
     KillsToReviveTitan = 4;
+
+    # 1v1 Lock (no respawns when last Human vs last PT)
+    NoRespawnAfter1v1 = true;
+    NoRespawnAfter1v1Tooltip = "Locks normal respawn and kill-to-revive when only 1 Human and 1 PT remain.";
+    Final1v1HumanPos = Vector3(176.4036, 78.80701, 356.9931);
+    Final1v1TitanPos = Vector3(-113.188, 82.42618, 348.2049);
 
 # Titan Jump Cooldown
     _EnableTitanJumpCooldown = true;
@@ -105,12 +111,17 @@ class Main {
     _SlowMode = true;
     _SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
 
-# UI State
+    # UI State
     _rulesPopupCreated = false;
     _debugPopupCreated = false;
 
-# Permission Messages
+    # Permission Messages
     _nopermission = "<color='#CC0000'>Error: You do not have permission!</color>";
+
+    # Runtime state
+    _NoRespawnLockActive = false;
+    _Final1v1Teleported = false;
+    _Final1v1SequenceRunning = false;
 
 
  /*===== INITIALIZATION =====*/
@@ -196,6 +207,7 @@ class Main {
         if (Main._EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnSecond();
         }
+        if (Main._EnableTeamSystem) {TeamSystem.CheckFinal1v1Lock();}
 
     }
 
@@ -726,6 +738,20 @@ extension CommandSystem {
                 return false;
             }
 
+            # Debug: print current position
+            if (cmdword == "pos") {
+                if (Network.MyPlayer != null && Network.MyPlayer.Character != null) {
+                    pos = Network.MyPlayer.Character.Position;
+                    Game.Print("POS: " + 
+                        Convert.ToString(pos.X) + ", " + 
+                        Convert.ToString(pos.Y) + ", " + 
+                        Convert.ToString(pos.Z));
+                } else {
+                    Game.Print("POS: character not available.");
+                }
+                return false;
+            }
+
             # Slow motion toggle
             if (cmdword == "slowmo") {
                 if (!Network.IsMasterClient) {
@@ -1195,6 +1221,7 @@ extension KillToReviveSystem {
     {
         # Count kills toward revival and revive when threshold reached
         if (!Main.EnableKillToReviveSystem) {return;}
+        if (Main._NoRespawnLockActive) {return;}
         if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
         {
             return;
@@ -1273,6 +1300,10 @@ extension RespawnSystem {
             self.respawn_timers.Set(key, timeLeft);
             
             if (timeLeft <= 0) {
+                if (Main._NoRespawnLockActive) {
+                    keys_to_remove.Add(key);
+                    continue;
+                }
                 # Extract player ID (remove H-/T- prefix)
                 playerID = String.Replace(key, "H-", "");
                 playerID = String.Replace(playerID, "T-", "");
@@ -1347,6 +1378,7 @@ extension RespawnSystem {
     function QueueRespawn(victim) {
         # Queue a respawn timer for a dead player
         if (!Main._EnableRespawnSystem) {return;}
+        if (Main._NoRespawnLockActive) {return;}
 
         # Determine team prefix (H- for human, T- for titan)
         teamPrefix = "T-";
@@ -1383,6 +1415,7 @@ extension RespawnSystem {
     function QueueRespawnWithDelay(player, delay) {
         # Queue a respawn timer with a fixed delay (used by admin revive commands)
         if (!Main._EnableRespawnSystem) {return;}
+        if (Main._NoRespawnLockActive) {return;}
         if (player == null) {return;}
 
         teamPrefix = "T-";
@@ -1439,10 +1472,7 @@ extension RespawnSystem {
             UI.SetLabel("BottomCenter", message);
         } else {
             UI.SetLabel("BottomCenter", 
-                "<size=24><color=#FFFF00>WAITING TO RESPAWN...</color></size>" +
-                String.Newline +
-                "<size=18><color=#AAAAAA>Base respawn time: " + 
-                Convert.ToInt(self.BaseRespawnTime) + "s</color></size>"
+                "<size=24><color=#FFFF00>WAITING TO RESPAWN...</color></size>"
             );
         }
     }
@@ -1552,6 +1582,85 @@ extension ScoreSystem {
 }
 
 extension TeamSystem {
+    function CheckFinal1v1Lock() {
+        if (!Main.NoRespawnAfter1v1) {return;}
+
+        is1v1 = (Game.PlayerHumans.Count == 1 && Game.PlayerTitans.Count == 1);
+        if (is1v1 && !Main._NoRespawnLockActive) {
+            Main._NoRespawnLockActive = true;
+            Main._Final1v1Teleported = false;
+            Main._Final1v1SequenceRunning = true;
+
+            # Clear any pending respawns
+            if (RespawnSystem.respawn_timer_keys != null) {
+                RespawnSystem.respawn_timer_keys.Clear();
+            }
+            if (RespawnSystem.respawn_timers != null) {
+                RespawnSystem.respawn_timers.Clear();
+            }
+
+            self.StartFinal1v1Sequence();
+        } elif (!is1v1 && Main._NoRespawnLockActive) {
+            Main._NoRespawnLockActive = false;
+            Main._Final1v1Teleported = false;
+            Main._Final1v1SequenceRunning = false;
+        }
+    }
+
+    function TeleportFinal1v1Players() {
+        if (Main._Final1v1Teleported) {return;}
+
+        # Find the last human and last player titan
+        human = null;
+        titan = null;
+        for (h in Game.PlayerHumans) {
+            if (h != null) { human = h; break; }
+        }
+        for (t in Game.PlayerTitans) {
+            if (t != null) { titan = t; break; }
+        }
+
+        if (human != null) {
+            human.Position = Main.Final1v1HumanPos;
+        }
+        if (titan != null) {
+            titan.Position = Main.Final1v1TitanPos;
+        }
+
+        Main._Final1v1Teleported = true;
+    }
+
+    coroutine StartFinal1v1Sequence() {
+        if (Main._Final1v1SequenceRunning == false) { return; }
+
+        Time.TimeScale = 0.2;
+
+        # Countdown before teleport
+        for (i in Range(5, 0, -1)) {
+            UI.SetLabelAll("MiddleCenter",
+                "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
+                String.Newline +
+                "<size=24><color=#FFFFFF>Teleporting in " + Convert.ToString(i) + "</color></size>"
+            );
+            wait 0.2;
+        }
+
+        self.TeleportFinal1v1Players();
+
+        # Countdown after teleport
+        for (i in Range(5, 0, -1)) {
+            UI.SetLabelAll("MiddleCenter",
+                "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
+                String.Newline +
+                "<size=24><color=#FFFFFF>Fight starts in " + Convert.ToString(i) + "</color></size>"
+            );
+            wait 0.2;
+        }
+
+        UI.SetLabelAll("MiddleCenter", "");
+        Time.TimeScale = 1.0;
+        Main._Final1v1SequenceRunning = false;
+    }
     function UpdateTeamUI() {
         # Update top-center team UI labels
         if (!Main._EnableTeamSystem) {return;}
