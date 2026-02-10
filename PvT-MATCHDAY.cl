@@ -63,7 +63,7 @@ class Main {
     _ReviveAllDelayTooltip = "Delay in seconds before ReviveAll commands respawn players.";
 
 # Idle System
-    _EnableIdleSystem = true;
+    _EnableIdleSystem = false;
 
     _IdleKillTime = 60;
     _IdleKillTimeTooltip = "Time in seconds before a player is considered Idle and is killed.";
@@ -95,13 +95,13 @@ class Main {
     _JumpCoolDown = 3.0;  # Cooldown in seconds
 
 # Titan Stats
-    _TitanAttackSpeed = 1.5;
-    _TitanMaxStamina = 10; 
-    _TitanStamina = 10; 
+    _TitanAttackSpeed = 1;
+    _TitanMaxStamina = 5; 
+    _TitanStamina = 5; 
     _TitanAttackPause = 0.1;
 
 # System Toggles (no per-setting fields)
-    _EnableAhssUnlockSystem = true;
+    _EnableAhssUnlockSystem = false;
     _EnableDamageSystem = true;
     _EnableScoreSystem = true;
     _EnableMovementSystem = true;
@@ -124,30 +124,30 @@ class Main {
     _Final1v1SequenceRunning = false;
 
 # Debug
-    DebugMode = false;
-    DebugLogToFile = false;
+    _DebugMode = false;
+    _DebugLogToFile = false;
     _DebugLogFileName = "pvt";
-    DebugLogFlushSeconds = 600; # 10 minutes
-    DebugLogMaxBuffer = 8000;   # chars
-    DebugLogWindowSeconds = 300; # keep last 5 minutes
-    SuperDebugMode = false;
-    SuperDebugLogToFile = false;
-    SuperDebugLogFileName = "pvtsuper";
-    SuperDebugLogFlushSeconds = 300; # 5 minutes
-    SuperDebugLogMaxBuffer = 20000; # chars
-    SuperDebugLogWindowFrames = 600; # keep last ~10s at 60fps
-    SuperDebugConsoleEnabled = false;
-    SuperDebugSampleEveryFrames = 10;
-    DebugStartOnLaunch = false;
+    _DebugLogFlushSeconds = 600; # 10 minutes
+    _DebugLogMaxBuffer = 8000;   # chars
+    _DebugLogWindowSeconds = 300; # keep last 5 minutes
+    _SuperDebugMode = false;
+    _SuperDebugLogToFile = false;
+    _SuperDebugLogFileName = "pvtsuper";
+    _SuperDebugLogFlushSeconds = 300; # 5 minutes
+    _SuperDebugLogMaxBuffer = 20000; # chars
+    _SuperDebugLogWindowFrames = 600; # keep last ~10s at 60fps
+    _SuperDebugConsoleEnabled = false;
+    _SuperDebugSampleEveryFrames = 10;
+    _DebugStartOnLaunch = false;
 
 
  /*===== INITIALIZATION =====*/
     function Init() {
-        if (!Main.DebugStartOnLaunch) {
-            Main.DebugMode = false;
-            Main.DebugLogToFile = false;
-            Main.SuperDebugMode = false;
-            Main.SuperDebugLogToFile = false;
+        if (!Main._DebugStartOnLaunch) {
+            Main._DebugMode = false;
+            Main._DebugLogToFile = false;
+            Main._SuperDebugMode = false;
+            Main._SuperDebugLogToFile = false;
         }
         # Initialize systems only if they're enabled
         if (Main._EnableIdleSystem) {
@@ -185,7 +185,7 @@ class Main {
             TitanJumpCooldown.Init();
         }
 
-        if (Main.DebugLogToFile) {
+        if (Main._DebugLogToFile) {
             Main._DebugLogFileName = "pvt";
             DebugSystem.EnsureFileLoaded();
         }
@@ -308,7 +308,7 @@ extension DebugSystem {
     _superRecentLines = List();
 
     function Inc(key) {
-        if (!Main.DebugMode) {return;}
+        if (!Main._DebugMode) {return;}
         if (self._counts == null) { self._counts = new Dict(); }
         current = self._counts.Get(key, 0);
         self._counts.Set(key, current + 1);
@@ -320,7 +320,7 @@ extension DebugSystem {
     }
 
     function ReportAndReset() {
-        if (!Main.DebugMode) {return;}
+        if (!Main._DebugMode) {return;}
 
         msg = "[DEBUG]" + String.Newline +
             "  Frame: Mv=" + self.Get("MovementFrame") +
@@ -345,7 +345,7 @@ extension DebugSystem {
 
         Game.Debug(msg);
 
-        if (Main.DebugLogToFile) {
+        if (Main._DebugLogToFile) {
             self.AppendLog(msg);
         }
 
@@ -353,11 +353,11 @@ extension DebugSystem {
     }
 
     function FrameSnapshot() {
-        if (!Main.SuperDebugMode) {return;}
+        if (!Main._SuperDebugMode) {return;}
         self._frameCount += 1;
 
-        if (Main.SuperDebugSampleEveryFrames > 1) {
-            if ((self._frameCount % Main.SuperDebugSampleEveryFrames) != 0) {
+        if (Main._SuperDebugSampleEveryFrames > 1) {
+            if ((self._frameCount % Main._SuperDebugSampleEveryFrames) != 0) {
                 return;
             }
         }
@@ -371,10 +371,10 @@ extension DebugSystem {
             }
         }
         msg = "[SDEBUG f" + Convert.ToString(self._frameCount) + "] Vel=" + vel;
-        if (Main.SuperDebugConsoleEnabled) {
+        if (Main._SuperDebugConsoleEnabled) {
             Game.Debug(msg);
         }
-        if (Main.SuperDebugLogToFile) {
+        if (Main._SuperDebugLogToFile) {
             self.AppendSuperLog(msg);
         }
     }
@@ -384,14 +384,14 @@ extension DebugSystem {
 
         entry = line;
         self._superRecentLines.Add(entry);
-        if (self._superRecentLines.Count > Main.SuperDebugLogWindowFrames) {
+        if (self._superRecentLines.Count > Main._SuperDebugLogWindowFrames) {
             self._superRecentLines.RemoveAt(0);
         }
 
         self._superLogBuffer += entry + String.Newline;
 
-        if (String.Length(self._superLogBuffer) >= Main.SuperDebugLogMaxBuffer ||
-            self._superFlushCounter >= Main.SuperDebugLogFlushSeconds) {
+        if (String.Length(self._superLogBuffer) >= Main._SuperDebugLogMaxBuffer ||
+            self._superFlushCounter >= Main._SuperDebugLogFlushSeconds) {
             self.FlushSuperLog();
         }
     }
@@ -399,28 +399,28 @@ extension DebugSystem {
     function EnsureSuperFileLoaded() {
         if (self._superFileLoaded) {return;}
         if (!self._superFileNameChecked) {
-            ok = PersistentData.IsValidFileName(Main.SuperDebugLogFileName);
-            Game.Debug("[DEBUG] Super log file name '" + Main.SuperDebugLogFileName + "' valid=" + Convert.ToString(ok));
+            ok = PersistentData.IsValidFileName(Main._SuperDebugLogFileName);
+            Game.Debug("[DEBUG] Super log file name '" + Main._SuperDebugLogFileName + "' valid=" + Convert.ToString(ok));
             self._superFileNameChecked = true;
         }
 
-        if (!PersistentData.IsValidFileName(Main.SuperDebugLogFileName)) {
+        if (!PersistentData.IsValidFileName(Main._SuperDebugLogFileName)) {
             Game.Debug("[DEBUG] Invalid super log file name. Falling back to 'pvtsuper'.");
-            Main.SuperDebugLogFileName = "pvtsuper";
+            Main._SuperDebugLogFileName = "pvtsuper";
             self._superFileLoaded = true;
             self._superFileValid = false;
             return;
         }
         self._superFileValid = true;
 
-        if (PersistentData.FileExists(Main.SuperDebugLogFileName)) {
-            PersistentData.LoadFromFile(Main.SuperDebugLogFileName, false);
+        if (PersistentData.FileExists(Main._SuperDebugLogFileName)) {
+            PersistentData.LoadFromFile(Main._SuperDebugLogFileName, false);
         }
         self._superFileLoaded = true;
     }
 
     function FlushSuperLog() {
-        if (!Main.SuperDebugLogToFile) {return;}
+        if (!Main._SuperDebugLogToFile) {return;}
         if (String.Length(self._superLogBuffer) == 0) {return;}
 
         self.EnsureSuperFileLoaded();
@@ -431,17 +431,17 @@ extension DebugSystem {
             joined = joined + line + String.Newline;
         }
         PersistentData.SetProperty("pvt_super_debug_log", joined);
-        PersistentData.SaveToFile(Main.SuperDebugLogFileName, false);
+        PersistentData.SaveToFile(Main._SuperDebugLogFileName, false);
 
         self._superLogBuffer = "";
         self._superFlushCounter = 0;
     }
 
     function ClearSuperLog() {
-        if (!PersistentData.IsValidFileName(Main.SuperDebugLogFileName)) {return;}
+        if (!PersistentData.IsValidFileName(Main._SuperDebugLogFileName)) {return;}
         PersistentData.Clear();
         PersistentData.SetProperty("pvt_super_debug_log", "");
-        PersistentData.SaveToFile(Main.SuperDebugLogFileName, false);
+        PersistentData.SaveToFile(Main._SuperDebugLogFileName, false);
         self._superLogBuffer = "";
         self._superFlushCounter = 0;
         self._superFileLoaded = false;
@@ -455,14 +455,14 @@ extension DebugSystem {
 
         entry = Convert.ToString(self._logSeconds) + "s | " + line;
         self._recentLines.Add(entry);
-        if (self._recentLines.Count > Main.DebugLogWindowSeconds) {
+        if (self._recentLines.Count > Main._DebugLogWindowSeconds) {
             self._recentLines.RemoveAt(0);
         }
 
         self._logBuffer += entry + String.Newline;
 
-        if (String.Length(self._logBuffer) >= Main.DebugLogMaxBuffer ||
-            self._flushCounter >= Main.DebugLogFlushSeconds) {
+        if (String.Length(self._logBuffer) >= Main._DebugLogMaxBuffer ||
+            self._flushCounter >= Main._DebugLogFlushSeconds) {
             self.FlushLog();
         }
     }
@@ -494,7 +494,7 @@ extension DebugSystem {
     }
 
     function FlushLog() {
-        if (!Main.DebugLogToFile) {return;}
+        if (!Main._DebugLogToFile) {return;}
         if (String.Length(self._logBuffer) == 0) {return;}
 
         self.EnsureFileLoaded();
@@ -1087,29 +1087,29 @@ extension CommandSystem {
 
             # Debug controls
             if (cmdword == "debugstart") {
-                Main.DebugMode = true;
-                Main.DebugLogToFile = true;
+                Main._DebugMode = true;
+                Main._DebugLogToFile = true;
                 Main._DebugLogFileName = "pvt";
                 Game.Print("Debug logging enabled.");
                 return false;
             }
             if (cmdword == "debugstop") {
-                Main.DebugMode = false;
-                Main.DebugLogToFile = false;
-                Main.SuperDebugMode = false;
-                Main.SuperDebugLogToFile = false;
+                Main._DebugMode = false;
+                Main._DebugLogToFile = false;
+                Main._SuperDebugMode = false;
+                Main._SuperDebugLogToFile = false;
                 Game.Print("Debug logging disabled.");
                 return false;
             }
             if (cmdword == "superdebugstart") {
-                Main.SuperDebugMode = true;
-                Main.SuperDebugLogToFile = true;
+                Main._SuperDebugMode = true;
+                Main._SuperDebugLogToFile = true;
                 Game.Print("Super debug enabled (frame-by-frame).");
                 return false;
             }
             if (cmdword == "superdebugstop") {
-                Main.SuperDebugMode = false;
-                Main.SuperDebugLogToFile = false;
+                Main._SuperDebugMode = false;
+                Main._SuperDebugLogToFile = false;
                 Game.Print("Super debug disabled.");
                 return false;
             }
