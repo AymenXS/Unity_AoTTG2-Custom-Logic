@@ -1379,6 +1379,10 @@ extension AHSSUnlockSystem {
         if (Network.MyPlayer == null || Network.MyPlayer.Character == null) {return;}
         character = Network.MyPlayer.Character;
         if (character.Type != "Human") {return;}
+        if (self._ahssUnlocked && !self.IsLocalUnlocker()) {
+            UI.SetLabel("BottomRight", "");
+            return;
+        }
 
         if (self._unlockPending) {
             UI.SetLabel("BottomRight", "Hold <color=yellow>'Reload'</color> for 2s to unlock AHSS");
@@ -1418,6 +1422,7 @@ extension AHSSUnlockSystem {
         if (Network.MyPlayer == null || Network.MyPlayer.Character == null) {return;}
         character = Network.MyPlayer.Character;
         if (character.Type != "Human") {return;}
+        if (self._ahssUnlocked && !self.IsLocalUnlocker()) {return;}
 
         if (self._unlockPending) {
             if (Input.GetKeyHold("Human/Reload")) {
@@ -1461,6 +1466,13 @@ extension AHSSUnlockSystem {
         } else {
             self._manualLockHoldSeconds = 0;
         }
+    }
+
+    function IsLocalUnlocker()
+    {
+        if (self._ahssUnlocker == null) {return false;}
+        return String.ToLower(String.Trim(self._ahssUnlocker)) ==
+               String.ToLower(String.Trim(Network.MyPlayer.Name));
     }
 
     function SwitchToBlades(character)
