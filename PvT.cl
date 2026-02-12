@@ -88,6 +88,8 @@ class Main {
     NoRespawnAfter1v1Tooltip = "Locks normal respawn and kill-to-revive when only 1 Human and 1 PT remain.";
     Final1v1HumanPos = Vector3(176.4036, 78.80701, 356.9931);
     Final1v1TitanPos = Vector3(-113.188, 82.42618, 348.2049);
+    _Final1v1TimeScale = 0.2;
+    _Final1v1TimeScaleTooltip = "Time scale during final 1v1 countdowns (lower = slower).";
 
 # Titan Jump Cooldown
     _EnableTitanJumpCooldown = true;
@@ -110,6 +112,8 @@ class Main {
 # Slow Motion Ending
     _SlowMode = true;
     _SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
+    _SlowModeScale = 0.3;
+    _SlowModeScaleTooltip = "Time scale used for end-of-round slow motion.";
 
 # UI State
     _rulesPopupCreated = false;
@@ -246,6 +250,29 @@ class Main {
 
     function OnCharacterSpawn(character) {
         # Update UI and apply spawn-related systems
+        if (Main._NoRespawnLockActive && Main.NoRespawnAfter1v1) {
+            player = character.Player;
+            allow = false;
+            for (h in Game.PlayerHumans) {
+                if (h != null && h.Player != null && h.Player.ID == player.ID) {
+                    allow = true;
+                    break;
+                }
+            }
+            if (!allow) {
+                for (t in Game.PlayerTitans) {
+                    if (t != null && t.Player != null && t.Player.ID == player.ID) {
+                        allow = true;
+                        break;
+                    }
+                }
+            }
+            if (!allow) {
+                character.GetKilled("Final1v1");
+                Network.SendMessage(player, "Final1v1Lock");
+                return;
+            }
+        }
         if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamSpawn");}
         if (Main._EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character); DebugSystem.Inc("RockThrowSpawn");}
         if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn(); DebugSystem.Inc("KTRSpawn");}
@@ -255,18 +282,21 @@ class Main {
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
         # Damage processing and win checks
         if (Main._EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage); DebugSystem.Inc("Damage");}
-        if (Main._EnableTeamSystem) {
-            TeamSystem.CheckVictoryConditions();
-            TeamSystem.UpdateTeamUI();
-            DebugSystem.Inc("TeamDamage");
-        }
+        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamDamage");}
     }
 
     function OnCharacterDie(victim, killer, killerName) {
         # Death handling for revival and stats
         if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName); DebugSystem.Inc("AHSSKill");}
         if (Main._EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName); DebugSystem.Inc("Death");}
-        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamDeath");}
+        if (Main._EnableTeamSystem) {
+            # Only check win conditions on relevant deaths (Human or Player Titan)
+            if (victim.Type == "Human" || (victim.Type == "Titan" && !victim.IsAI)) {
+                TeamSystem.CheckVictoryConditions();
+            }
+            TeamSystem.UpdateTeamUI();
+            DebugSystem.Inc("TeamDeath");
+        }
     }   
 
     function OnNetworkMessage(sender, message) {
@@ -749,6 +779,14 @@ extension NetworkSystem {
         elif (String.StartsWith(message, "KillCredit|")) {
             DamageSystem.HandleKillCreditMessage(sender, message);
         }
+        elif (message == "Final1v1Lock") {
+            UI.SetLabelForTime("MiddleCenter",
+                "<size=26><color=#FFAA00>Final 1v1 in progress</color></size>" +
+                String.Newline +
+                "<size=20><color=#FFFFFF>Please wait for the round to end.</color></size>",
+                5
+            );
+        }
     }
 
     function HandleSlowMo(message) {
@@ -757,7 +795,7 @@ extension NetworkSystem {
             Time.TimeScale = 1.0;
             Game.Print("Slow motion disabled");
         } else {
-            Time.TimeScale = 0.5;
+            Time.TimeScale = Main._SlowModeScale;
             Game.Print("Slow motion enabled");
         }
     }
@@ -2041,7 +2079,7 @@ extension TeamSystem {
     coroutine StartFinal1v1Sequence() {
         if (Main._Final1v1SequenceRunning == false) { return; }
 
-        Time.TimeScale = 0.2;
+        Time.TimeScale = Main._Final1v1TimeScale;
 
         # Countdown before teleport
         for (i in Range(5, 0, -1)) {
@@ -2054,6 +2092,7 @@ extension TeamSystem {
         }
 
         self.TeleportFinal1v1Players();
+        self.RefillFinal1v1Players();
 
         # Countdown after teleport
         for (i in Range(5, 0, -1)) {
@@ -2068,6 +2107,26 @@ extension TeamSystem {
         UI.SetLabelAll("MiddleCenter", "");
         Time.TimeScale = 1.0;
         Main._Final1v1SequenceRunning = false;
+    }
+
+    function RefillFinal1v1Players() {
+        # Find the last human and last player titan
+        human = null;
+        titan = null;
+        for (h in Game.PlayerHumans) {
+            if (h != null) { human = h; break; }
+        }
+        for (t in Game.PlayerTitans) {
+            if (t != null) { titan = t; break; }
+        }
+
+        if (human != null) {
+            human.RefillImmediate();
+            human.SetWeapon("Blade");
+        }
+        if (titan != null) {
+            titan.Stamina = titan.MaxStamina;
+        }
     }
     function UpdateTeamUI() {
         # Update top-center team UI labels
@@ -2130,7 +2189,7 @@ extension TeamSystem {
             );
             
             if (Main._SlowMode) {
-                Time.TimeScale = 0.5; # slowmo ending
+            Time.TimeScale = Main._SlowModeScale; # slowmo ending
                 Game.End(3.33);
             } else {
                 Game.End(10);
@@ -2148,7 +2207,7 @@ extension TeamSystem {
                     );
                     
                     if (Main._SlowMode) {
-                        Time.TimeScale = 0.5;
+                        Time.TimeScale = Main._SlowModeScale;
                         Game.End(3.33);
                     } else {
                         Game.End(10);
@@ -2159,13 +2218,16 @@ extension TeamSystem {
             } else {
                 if (Game.AITitans.Count < 5) {
                     ScoreSystem._HumanScore += 1;
+                    Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
                     UI.SetLabelForTime("MiddleCenter", 
                         "<color='#FFFF00'>AUTO-RESTARTING...</color>", 
                         3
                     );
                     
                     if (Main._SlowMode) {
-                        Time.TimeScale = 0.5;
+                        Time.TimeScale = Main._SlowModeScale;
                         Game.End(3.33);
                     } else {
                         Game.End(5);
