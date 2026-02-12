@@ -122,10 +122,12 @@ class Main {
 # Permission Messages
     _nopermission = "<color=#CC0000>Error: You do not have permission!</color>";
 
-# Runtime state
+    # Runtime state
     _NoRespawnLockActive = false;
     _Final1v1Teleported = false;
     _Final1v1SequenceRunning = false;
+    _Final1v1HumanID = -1;
+    _Final1v1TitanID = -1;
 
 # Debug
     _DebugMode = false;
@@ -217,6 +219,11 @@ class Main {
     function OnGameStart() {
         # Spawn initial AI titans
         Game.SpawnTitansAsync("Default", self.Titans);
+        Main._NoRespawnLockActive = false;
+        Main._Final1v1Teleported = false;
+        Main._Final1v1SequenceRunning = false;
+        Main._Final1v1HumanID = -1;
+        Main._Final1v1TitanID = -1;
     }
 
     /*===== EVENT HANDLERS =====*/
@@ -252,21 +259,8 @@ class Main {
         # Update UI and apply spawn-related systems
         if (Main._NoRespawnLockActive && Main.NoRespawnAfter1v1) {
             player = character.Player;
-            allow = false;
-            for (h in Game.PlayerHumans) {
-                if (h != null && h.Player != null && h.Player.ID == player.ID) {
-                    allow = true;
-                    break;
-                }
-            }
-            if (!allow) {
-                for (t in Game.PlayerTitans) {
-                    if (t != null && t.Player != null && t.Player.ID == player.ID) {
-                        allow = true;
-                        break;
-                    }
-                }
-            }
+            allow = (player != null &&
+                (player.ID == Main._Final1v1HumanID || player.ID == Main._Final1v1TitanID));
             if (!allow) {
                 character.GetKilled("Final1v1");
                 Network.SendMessage(player, "Final1v1Lock");
@@ -279,24 +273,32 @@ class Main {
         PlayerTitanStats.OnCharacterSpawn(character);
     }
 
+    function OnPlayerJoin(player) {
+        if (Main._NoRespawnLockActive && Main.NoRespawnAfter1v1) {
+            Network.SendMessage(player, "Final1v1Lock");
+        }
+    }
+
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
         # Damage processing and win checks
         if (Main._EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage); DebugSystem.Inc("Damage");}
-        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamDamage");}
+        if (Main._EnableTeamSystem) {
+            # Only check wins on Human or Player Titan deaths
+            if (victim != null && victim.Health <= 0) {
+                if (victim.Type == "Human" || (victim.Type == "Titan" && !victim.IsAI)) {
+                    TeamSystem.CheckVictoryConditions();
+                }
+            }
+            TeamSystem.UpdateTeamUI();
+            DebugSystem.Inc("TeamDamage");
+        }
     }
 
     function OnCharacterDie(victim, killer, killerName) {
         # Death handling for revival and stats
         if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName); DebugSystem.Inc("AHSSKill");}
         if (Main._EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName); DebugSystem.Inc("Death");}
-        if (Main._EnableTeamSystem) {
-            # Only check win conditions on relevant deaths (Human or Player Titan)
-            if (victim.Type == "Human" || (victim.Type == "Titan" && !victim.IsAI)) {
-                TeamSystem.CheckVictoryConditions();
-            }
-            TeamSystem.UpdateTeamUI();
-            DebugSystem.Inc("TeamDeath");
-        }
+        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamDeath");}
     }   
 
     function OnNetworkMessage(sender, message) {
@@ -2036,6 +2038,7 @@ extension TeamSystem {
             Main._NoRespawnLockActive = true;
             Main._Final1v1Teleported = false;
             Main._Final1v1SequenceRunning = true;
+            self.CaptureFinal1v1Players();
 
             # Clear any pending respawns
             if (RespawnSystem.respawn_timer_keys != null) {
@@ -2046,10 +2049,6 @@ extension TeamSystem {
             }
 
             self.StartFinal1v1Sequence();
-        } elif (!is1v1 && Main._NoRespawnLockActive) {
-            Main._NoRespawnLockActive = false;
-            Main._Final1v1Teleported = false;
-            Main._Final1v1SequenceRunning = false;
         }
     }
 
@@ -2082,7 +2081,7 @@ extension TeamSystem {
         Time.TimeScale = Main._Final1v1TimeScale;
 
         # Countdown before teleport
-        for (i in Range(5, 0, -1)) {
+        for (i in Range(3, 0, -1)) {
             UI.SetLabelAll("MiddleCenter",
                 "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
                 String.Newline +
@@ -2095,7 +2094,7 @@ extension TeamSystem {
         self.RefillFinal1v1Players();
 
         # Countdown after teleport
-        for (i in Range(5, 0, -1)) {
+        for (i in Range(3, 0, -1)) {
             UI.SetLabelAll("MiddleCenter",
                 "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
                 String.Newline +
@@ -2126,6 +2125,24 @@ extension TeamSystem {
         }
         if (titan != null) {
             titan.Stamina = titan.MaxStamina;
+        }
+    }
+
+    function CaptureFinal1v1Players() {
+        # Store the two participants for the rest of the round
+        Main._Final1v1HumanID = -1;
+        Main._Final1v1TitanID = -1;
+        for (h in Game.PlayerHumans) {
+            if (h != null && h.Player != null) {
+                Main._Final1v1HumanID = h.Player.ID;
+                break;
+            }
+        }
+        for (t in Game.PlayerTitans) {
+            if (t != null && t.Player != null) {
+                Main._Final1v1TitanID = t.Player.ID;
+                break;
+            }
         }
     }
     function UpdateTeamUI() {
@@ -2178,11 +2195,49 @@ extension TeamSystem {
     function CheckVictoryConditions() {
         # Check and process win conditions
         if (!Main._EnableTeamSystem) {return;}
+        # Final 1v1: force restart when one side is eliminated (ignore AI)
+        if (Main._NoRespawnLockActive) {
+            if (Game.PlayerHumans.Count == 0) {
+                ScoreSystem._TitanScore += 1;
+                Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                UI.SetLabelForTime("MiddleCenter",
+                    "<color=#FFE14C>TITANS WIN!</color>" + String.Newline + "(Final 1v1)",
+                    5
+                );
+                if (Main._SlowMode) {
+                    Time.TimeScale = Main._SlowModeScale;
+                    Game.End(2);
+                } else {
+                    Game.End(5);
+                }
+                return;
+            } elif (Game.PlayerTitans.Count == 0) {
+                ScoreSystem._HumanScore += 1;
+                Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                UI.SetLabelForTime("MiddleCenter",
+                    "<color=#00FF00>HUMANS WIN!</color>" + String.Newline + "(Final 1v1)",
+                    5
+                );
+                if (Main._SlowMode) {
+                    Time.TimeScale = Main._SlowModeScale;
+                    Game.End(2);
+                } else {
+                    Game.End(5);
+                }
+                return;
+            }
+        }
         # Case 1: All humans dead - Titans win
         if (Game.PlayerHumans.Count == 0) {
             # Titans win condition
             ScoreSystem._TitanScore += 1;
             Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+            RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+            RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
             UI.SetLabelForTime("MiddleCenter",
                 "<color='#FFE14C'>TITANS WIN!</color>" + String.Newline + "(All Humans eliminated)", 
                 5
@@ -2190,7 +2245,7 @@ extension TeamSystem {
             
             if (Main._SlowMode) {
             Time.TimeScale = Main._SlowModeScale; # slowmo ending
-                Game.End(3.33);
+                Game.End(2);
             } else {
                 Game.End(10);
             }
@@ -2201,6 +2256,8 @@ extension TeamSystem {
                 if (Game.AITitans.Count == 0) {
                     ScoreSystem._HumanScore += 1;
                     Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
                     UI.SetLabelForTime("MiddleCenter",
                         "<color='#00FF00'>HUMANS WIN!</color>" + String.Newline + "(All Titans eliminated)", 
                         5
@@ -2208,7 +2265,7 @@ extension TeamSystem {
                     
                     if (Main._SlowMode) {
                         Time.TimeScale = Main._SlowModeScale;
-                        Game.End(3.33);
+                        Game.End(2);
                     } else {
                         Game.End(10);
                     }
@@ -2228,7 +2285,7 @@ extension TeamSystem {
                     
                     if (Main._SlowMode) {
                         Time.TimeScale = Main._SlowModeScale;
-                        Game.End(3.33);
+                        Game.End(2);
                     } else {
                         Game.End(5);
                     }
@@ -2238,6 +2295,8 @@ extension TeamSystem {
                     CommandSystem.ReviveAllPTs();
                     Game.Print("Round Reset!");
                     Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
                 }
             }
         }
