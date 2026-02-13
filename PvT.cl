@@ -101,7 +101,7 @@ class Main {
     _TitanAttackPause = 0.1;
 
 # System Toggles (no per-setting fields)
-    _EnableAhssUnlockSystem = true;
+    _EnableAhssUnlockSystem = false;
     _EnableDamageSystem = true;
     _EnableScoreSystem = true;
     _EnableMovementSystem = true;
@@ -116,12 +116,7 @@ class Main {
 # Permission Messages
     _nopermission = "<color=#CC0000>Error: You do not have permission!</color>";
 
-    # Runtime state
-    _NoRespawnLockActive = false;
-    _Final1v1Teleported = false;
-    _Final1v1SequenceRunning = false;
-    _Final1v1HumanID = -1;
-    _Final1v1TitanID = -1;
+    # Runtime state (handled by Final1v1System)
 
 # Debug
     _DebugMode = false;
@@ -143,6 +138,7 @@ class Main {
 
  /*===== INITIALIZATION =====*/
     function Init() {
+        DebugSystem.Init();
         if (!Main._DebugStartOnLaunch) {
             Main._DebugMode = false;
             Main._DebugLogToFile = false;
@@ -186,7 +182,6 @@ class Main {
         }
 
         if (Main._DebugLogToFile) {
-            Main._DebugLogFileName = "pvt";
             DebugSystem.EnsureFileLoaded();
         }
 
@@ -213,11 +208,8 @@ class Main {
     function OnGameStart() {
         # Spawn initial AI titans
         Game.SpawnTitansAsync("Default", self.Titans);
-        Main._NoRespawnLockActive = false;
-        Main._Final1v1Teleported = false;
-        Main._Final1v1SequenceRunning = false;
-        Main._Final1v1HumanID = -1;
-        Main._Final1v1TitanID = -1;
+        Final1v1System.ResetState();
+        TeamSystem._winHandled = false;
     }
 
     /*===== EVENT HANDLERS =====*/
@@ -238,7 +230,12 @@ class Main {
         if (Main._EnableRespawnSystem) {RespawnSystem.OnSecond(); DebugSystem.Inc("RespawnSecond");}
         if (Main._EnableRockThrowSystem) {RockThrowSystem.OnSecond(); DebugSystem.Inc("RockThrowSecond");}
         if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnSecond(); DebugSystem.Inc("AHSSSecond");}
-        if (Main._EnableTeamSystem) {TeamSystem.CheckFinal1v1Lock(); DebugSystem.Inc("TeamSecond");}
+        if (Main._EnableTeamSystem) {
+            Final1v1System.CheckLock();
+            TeamSystem.UpdateTeamUI(); # ensure AI count stays fresh
+            TeamSystem.OnSecond();     # queued win checks
+            DebugSystem.Inc("TeamSecond");
+        }
         if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSecond();}
 
         DebugSystem.ReportAndReset();
@@ -247,17 +244,8 @@ class Main {
 
     function OnCharacterSpawn(character) {
         # Update UI and apply spawn-related systems
-        if (Main._NoRespawnLockActive && Main.NoRespawnAfter1v1) {
-            player = character.Player;
-            allow = (player != null &&
-                (player.ID == Main._Final1v1HumanID || player.ID == Main._Final1v1TitanID));
-            if (!allow) {
-                character.GetKilled("Final1v1");
-                Network.SendMessage(player, "Final1v1Lock");
-                return;
-            }
-        }
-        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamSpawn");}
+        Final1v1System.OnCharacterSpawn(character);
+        if (Main._EnableTeamSystem) {TeamSystem.OnCharacterSpawn(character); DebugSystem.Inc("TeamSpawn");}
         if (Main._EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character); DebugSystem.Inc("RockThrowSpawn");}
         if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn(); DebugSystem.Inc("KTRSpawn");}
         if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.EnforceLoadout(character);}
@@ -265,31 +253,20 @@ class Main {
     }
 
     function OnPlayerJoin(player) {
-        if (Main._NoRespawnLockActive && Main.NoRespawnAfter1v1) {
-            Network.SendMessage(player, "Final1v1Lock");
-        }
+        Final1v1System.OnPlayerJoin(player);
     }
 
     function OnCharacterDamaged(victim, killer, killerName, damage) {   
         # Damage processing and win checks
         if (Main._EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage); DebugSystem.Inc("Damage");}
-        if (Main._EnableTeamSystem) {
-            # Only check wins on Human or Player Titan deaths
-            if (victim != null && victim.Health <= 0) {
-                if (victim.Type == "Human" || (victim.Type == "Titan" && !victim.IsAI)) {
-                    TeamSystem.CheckVictoryConditions();
-                }
-            }
-            TeamSystem.UpdateTeamUI();
-            DebugSystem.Inc("TeamDamage");
-        }
+        if (Main._EnableTeamSystem) {TeamSystem.OnCharacterDamaged(victim); DebugSystem.Inc("TeamDamage");}
     }
 
     function OnCharacterDie(victim, killer, killerName) {
         # Death handling for revival and stats
         if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.ProcessTitanKill(victim, killer, killerName); DebugSystem.Inc("AHSSKill");}
         if (Main._EnableDamageSystem) {DeathSystem.HandleDeath(victim, killer, killerName); DebugSystem.Inc("Death");}
-        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamDeath");}
+        if (Main._EnableTeamSystem) {TeamSystem.OnCharacterDie(victim); DebugSystem.Inc("TeamDeath");}
     }   
 
     function OnNetworkMessage(sender, message) {
@@ -329,6 +306,40 @@ extension DebugSystem {
     _superFileValid = false;
     _superFileNameChecked = false;
     _superRecentLines = List();
+
+    function Init() {
+        # Keep debug state centralized
+        if (!Main._DebugStartOnLaunch) {
+            Main._DebugMode = false;
+            Main._DebugLogToFile = false;
+            Main._SuperDebugMode = false;
+            Main._SuperDebugLogToFile = false;
+        }
+        Main._DebugLogFileName = "pvt";
+    }
+
+    function StartDebug() {
+        Main._DebugMode = true;
+        Main._DebugLogToFile = true;
+        Main._DebugLogFileName = "pvt";
+    }
+
+    function StopDebug() {
+        Main._DebugMode = false;
+        Main._DebugLogToFile = false;
+        Main._SuperDebugMode = false;
+        Main._SuperDebugLogToFile = false;
+    }
+
+    function StartSuperDebug() {
+        Main._SuperDebugMode = true;
+        Main._SuperDebugLogToFile = true;
+    }
+
+    function StopSuperDebug() {
+        Main._SuperDebugMode = false;
+        Main._SuperDebugLogToFile = false;
+    }
 
     function Inc(key) {
         if (!Main._DebugMode) {return;}
@@ -742,13 +753,13 @@ extension DeathSystem {
 extension NetworkSystem {
     function HandleMessage(sender, message) {
         # Route incoming network messages to handlers
+        # Incoming messages are centralized here.
+        # Outgoing messages are sent by feature systems (AHSS, Respawn, Score, etc.).
+        # Add new message types here only for receive-side handling.
         if (!Main._EnableNetworkSystem) {return;}
         
-        if (message == "AHSS_LOCKED") {
-            AHSSUnlockSystem._ahssUnlocked = true;
-        }
-        elif (message == "AHSS_EXHAUSTED") {
-            AHSSUnlockSystem.HandleExhausted();
+        if (String.StartsWith(message, "AHSS_")) {
+            AHSSUnlockSystem.HandleNetworkMessage(message);
         }
         elif (String.StartsWith(message, "WinSync:")) {
             ScoreSystem.HandleWinSync(message);
@@ -779,10 +790,8 @@ extension NetworkSystem {
         # Toggle slow motion based on message
         if (message == "slowmo_off") {
             Time.TimeScale = 1.0;
-            Game.Print("Slow motion disabled");
         } else {
             Time.TimeScale = Main._SlowModeScale;
-            Game.Print("Slow motion enabled");
         }
     }
 
@@ -1111,29 +1120,22 @@ extension CommandSystem {
 
             # Debug controls
             if (cmdword == "debugstart") {
-                Main._DebugMode = true;
-                Main._DebugLogToFile = true;
-                Main._DebugLogFileName = "pvt";
+                DebugSystem.StartDebug();
                 Game.Print("Debug logging enabled.");
                 return false;
             }
             if (cmdword == "debugstop") {
-                Main._DebugMode = false;
-                Main._DebugLogToFile = false;
-                Main._SuperDebugMode = false;
-                Main._SuperDebugLogToFile = false;
+                DebugSystem.StopDebug();
                 Game.Print("Debug logging disabled.");
                 return false;
             }
             if (cmdword == "superdebugstart") {
-                Main._SuperDebugMode = true;
-                Main._SuperDebugLogToFile = true;
+                DebugSystem.StartSuperDebug();
                 Game.Print("Super debug enabled (frame-by-frame).");
                 return false;
             }
             if (cmdword == "superdebugstop") {
-                Main._SuperDebugMode = false;
-                Main._SuperDebugLogToFile = false;
+                DebugSystem.StopSuperDebug();
                 Game.Print("Super debug disabled.");
                 return false;
             }
@@ -1288,7 +1290,7 @@ extension CommandSystem {
 
 extension AHSSUnlockSystem {
     # Configuration - adjust these values as needed
-    PointsForAHSS = 5;
+    PointsForAHSS = 15;
     AITitanPointValue = 1;
     PlayerTitanPointValue = 3;
     _ahssConfirmationEnabled = true;
@@ -1316,6 +1318,15 @@ extension AHSSUnlockSystem {
         self._equipHoldSeconds = 0;
         self._manualLockHoldSeconds = 0;
         self._lowestAmmoTotal = 999;
+    }
+
+    function HandleNetworkMessage(message)
+    {
+        if (message == "AHSS_LOCKED") {
+            self._ahssUnlocked = true;
+        } elif (message == "AHSS_EXHAUSTED") {
+            self.HandleExhausted();
+        }
     }
 
     # Core functionality
@@ -1662,7 +1673,7 @@ extension KillToReviveSystem {
     {
         # Count kills toward revival and revive when threshold reached
         if (!Main.EnableKillToReviveSystem) {return;}
-        if (Main._NoRespawnLockActive) {return;}
+        if (Final1v1System.IsLocked()) {return;}
         if (Network.MyPlayer.Status != "Dead" || IdleSystem.IsAfk)
         {
             return;
@@ -1748,7 +1759,7 @@ extension RespawnSystem {
             self.respawn_timers.Set(key, timeLeft);
             
             if (timeLeft <= 0) {
-                if (Main._NoRespawnLockActive) {
+                if (Final1v1System.IsLocked()) {
                     keys_to_remove.Add(key);
                     continue;
                 }
@@ -1826,7 +1837,7 @@ extension RespawnSystem {
     function QueueRespawn(victim) {
         # Queue a respawn timer for a dead player
         if (!Main._EnableRespawnSystem) {return;}
-        if (Main._NoRespawnLockActive) {return;}
+        if (Final1v1System.IsLocked()) {return;}
 
         # Determine team prefix (H- for human, T- for titan)
         teamPrefix = "T-";
@@ -1863,7 +1874,7 @@ extension RespawnSystem {
     function QueueRespawnWithDelay(player, delay) {
         # Queue a respawn timer with a fixed delay (used by admin revive commands)
         if (!Main._EnableRespawnSystem) {return;}
-        if (Main._NoRespawnLockActive) {return;}
+        if (Final1v1System.IsLocked()) {return;}
         if (player == null) {return;}
 
         teamPrefix = "T-";
@@ -2010,16 +2021,34 @@ extension ScoreSystem {
     }
 }
 
-extension TeamSystem {
-    function CheckFinal1v1Lock() {
+extension Final1v1System {
+    _lockActive = false;
+    _teleported = false;
+    _sequenceRunning = false;
+    _humanID = -1;
+    _titanID = -1;
+
+    function ResetState() {
+        self._lockActive = false;
+        self._teleported = false;
+        self._sequenceRunning = false;
+        self._humanID = -1;
+        self._titanID = -1;
+    }
+
+    function IsLocked() {
+        return self._lockActive;
+    }
+
+    function CheckLock() {
         if (!Main.NoRespawnAfter1v1) {return;}
 
         is1v1 = (Game.PlayerHumans.Count == 1 && Game.PlayerTitans.Count == 1);
-        if (is1v1 && !Main._NoRespawnLockActive) {
-            Main._NoRespawnLockActive = true;
-            Main._Final1v1Teleported = false;
-            Main._Final1v1SequenceRunning = true;
-            self.CaptureFinal1v1Players();
+        if (is1v1 && !self._lockActive) {
+            self._lockActive = true;
+            self._teleported = false;
+            self._sequenceRunning = true;
+            self.CapturePlayers();
 
             # Clear any pending respawns
             if (RespawnSystem.respawn_timer_keys != null) {
@@ -2029,14 +2058,48 @@ extension TeamSystem {
                 RespawnSystem.respawn_timers.Clear();
             }
 
-            self.StartFinal1v1Sequence();
+            self.StartSequence();
         }
     }
 
-    function TeleportFinal1v1Players() {
-        if (Main._Final1v1Teleported) {return;}
+    function OnCharacterSpawn(character) {
+        if (self._lockActive && Main.NoRespawnAfter1v1) {
+            player = character.Player;
+            allow = (player != null &&
+                (player.ID == self._humanID || player.ID == self._titanID));
+            if (!allow) {
+                character.GetKilled("Final1v1");
+                Network.SendMessage(player, "Final1v1Lock");
+            }
+        }
+    }
 
-        # Find the last human and last player titan
+    function OnPlayerJoin(player) {
+        if (self._lockActive && Main.NoRespawnAfter1v1) {
+            Network.SendMessage(player, "Final1v1Lock");
+        }
+    }
+
+    function CapturePlayers() {
+        self._humanID = -1;
+        self._titanID = -1;
+        for (h in Game.PlayerHumans) {
+            if (h != null && h.Player != null) {
+                self._humanID = h.Player.ID;
+                break;
+            }
+        }
+        for (t in Game.PlayerTitans) {
+            if (t != null && t.Player != null) {
+                self._titanID = t.Player.ID;
+                break;
+            }
+        }
+    }
+
+    function TeleportPlayers() {
+        if (self._teleported) {return;}
+
         human = null;
         titan = null;
         for (h in Game.PlayerHumans) {
@@ -2053,44 +2116,10 @@ extension TeamSystem {
             titan.Position = Main.Final1v1TitanPos;
         }
 
-        Main._Final1v1Teleported = true;
+        self._teleported = true;
     }
 
-    coroutine StartFinal1v1Sequence() {
-        if (Main._Final1v1SequenceRunning == false) { return; }
-
-        Time.TimeScale = Main._Final1v1TimeScale;
-
-        # Countdown before teleport
-        for (i in Range(3, 0, -1)) {
-            UI.SetLabelAll("MiddleCenter",
-                "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
-                String.Newline +
-                "<size=24><color=#FFFFFF>Teleporting in " + Convert.ToString(i) + "</color></size>"
-            );
-            wait 0.2;
-        }
-
-        self.TeleportFinal1v1Players();
-        self.RefillFinal1v1Players();
-
-        # Countdown after teleport
-        for (i in Range(3, 0, -1)) {
-            UI.SetLabelAll("MiddleCenter",
-                "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
-                String.Newline +
-                "<size=24><color=#FFFFFF>Fight starts in " + Convert.ToString(i) + "</color></size>"
-            );
-            wait 0.2;
-        }
-
-        UI.SetLabelAll("MiddleCenter", "");
-        Time.TimeScale = 1.0;
-        Main._Final1v1SequenceRunning = false;
-    }
-
-    function RefillFinal1v1Players() {
-        # Find the last human and last player titan
+    function RefillPlayers() {
         human = null;
         titan = null;
         for (h in Game.PlayerHumans) {
@@ -2109,23 +2138,76 @@ extension TeamSystem {
         }
     }
 
-    function CaptureFinal1v1Players() {
-        # Store the two participants for the rest of the round
-        Main._Final1v1HumanID = -1;
-        Main._Final1v1TitanID = -1;
-        for (h in Game.PlayerHumans) {
-            if (h != null && h.Player != null) {
-                Main._Final1v1HumanID = h.Player.ID;
-                break;
-            }
+    coroutine StartSequence() {
+        if (self._sequenceRunning == false) { return; }
+
+        Time.TimeScale = Main._Final1v1TimeScale;
+
+        for (i in Range(3, 0, -1)) {
+            UI.SetLabelAll("MiddleCenter",
+                "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
+                String.Newline +
+                "<size=24><color=#FFFFFF>Teleporting in " + Convert.ToString(i) + "</color></size>"
+            );
+            wait 0.2;
         }
-        for (t in Game.PlayerTitans) {
-            if (t != null && t.Player != null) {
-                Main._Final1v1TitanID = t.Player.ID;
-                break;
-            }
+
+        self.TeleportPlayers();
+        self.RefillPlayers();
+
+        for (i in Range(3, 0, -1)) {
+            UI.SetLabelAll("MiddleCenter",
+                "<size=32><color=#FFAA00>FINAL 1V1</color></size>" +
+                String.Newline +
+                "<size=24><color=#FFFFFF>Fight starts in " + Convert.ToString(i) + "</color></size>"
+            );
+            wait 0.2;
+        }
+
+        UI.SetLabelAll("MiddleCenter", "");
+        Time.TimeScale = 1.0;
+        self._sequenceRunning = false;
+    }
+}
+
+extension TeamSystem {
+    _aiClearWinQueued = false;
+    _winHandled = false;
+
+    function ApplyEndSlowMo() {
+        if (!Main._SlowMode) { return; }
+        Network.SendMessageAll("slowmo");
+        Time.TimeScale = Main._SlowModeScale;
+    }
+
+    function OnSecond() {
+        if (!Main._EnableTeamSystem) {return;}
+        if (self._aiClearWinQueued) {
+            self._aiClearWinQueued = false;
+            self.CheckVictoryConditions();
         }
     }
+
+    function OnCharacterSpawn(character) {
+        if (!Main._EnableTeamSystem) {return;}
+        self.UpdateTeamUI();
+    }
+
+    function OnCharacterDamaged(victim) {
+        if (!Main._EnableTeamSystem) {return;}
+        if (victim != null && victim.Health <= 0) {
+            if (victim.Type == "Human" || (victim.Type == "Titan" && !victim.IsAI)) {
+                self.CheckVictoryConditions();
+            }
+        }
+        self.UpdateTeamUI();
+    }
+
+    function OnCharacterDie(victim) {
+        if (!Main._EnableTeamSystem) {return;}
+        self.UpdateTeamUI();
+    }
+
     function UpdateTeamUI() {
         # Update top-center team UI labels
         if (!Main._EnableTeamSystem) {return;}
@@ -2142,6 +2224,21 @@ extension TeamSystem {
             + " | <b><color='#FFE14C'>T</color></b> " + Game.PlayerTitans.Count
             + TeamScore
         );
+
+        # FullClear: show AI-left only when PTs are dead, and trigger win when AIs reach 0
+        if (Main.FullClear) {
+            if (Game.PlayerTitans.Count == 0) {
+                if (Game.AITitans.Count > 0) {
+                    UI.SetLabelAll("TopRight", "<color='#FF0000'>AIs left to win: </color>" + Game.AITitans.Count);
+                } else {
+                    # All AIs cleared; queue win check to avoid recursion
+                    self._aiClearWinQueued = true;
+                }
+            } else {
+                UI.SetLabelAll("TopRight", "");
+                self._aiClearWinQueued = false;
+            }
+        }
     }
     
     function TeamHeader(player) {
@@ -2176,38 +2273,45 @@ extension TeamSystem {
     function CheckVictoryConditions() {
         # Check and process win conditions
         if (!Main._EnableTeamSystem) {return;}
+        if (self._winHandled) {return;}
         # Final 1v1: force restart when one side is eliminated (ignore AI)
-        if (Main._NoRespawnLockActive) {
+        if (Final1v1System.IsLocked()) {
             if (Game.PlayerHumans.Count == 0) {
-                ScoreSystem._TitanScore += 1;
-                Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-                RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-                RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                self._winHandled = true;
                 UI.SetLabelForTime("MiddleCenter",
                     "<color=#FFE14C>TITANS WIN!</color>" + String.Newline + "(Final 1v1)",
                     5
                 );
-                if (Main._SlowMode) {
-                    Time.TimeScale = Main._SlowModeScale;
-                    Game.End(2);
-                } else {
-                    Game.End(5);
+                if (Network.IsMasterClient) {
+                    ScoreSystem._TitanScore += 1;
+                    Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                    if (Main._SlowMode) {
+                        self.ApplyEndSlowMo();
+                        Game.End(2);
+                    } else {
+                        Game.End(5);
+                    }
                 }
                 return;
             } elif (Game.PlayerTitans.Count == 0) {
-                ScoreSystem._HumanScore += 1;
-                Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-                RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-                RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                self._winHandled = true;
                 UI.SetLabelForTime("MiddleCenter",
                     "<color=#00FF00>HUMANS WIN!</color>" + String.Newline + "(Final 1v1)",
                     5
                 );
-                if (Main._SlowMode) {
-                    Time.TimeScale = Main._SlowModeScale;
-                    Game.End(2);
-                } else {
-                    Game.End(5);
+                if (Network.IsMasterClient) {
+                    ScoreSystem._HumanScore += 1;
+                    Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                    if (Main._SlowMode) {
+                        self.ApplyEndSlowMo();
+                        Game.End(2);
+                    } else {
+                        Game.End(5);
+                    }
                 }
                 return;
             }
@@ -2215,62 +2319,72 @@ extension TeamSystem {
         # Case 1: All humans dead - Titans win
         if (Game.PlayerHumans.Count == 0) {
             # Titans win condition
-            ScoreSystem._TitanScore += 1;
-            Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-            RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-            RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+            self._winHandled = true;
             UI.SetLabelForTime("MiddleCenter",
                 "<color='#FFE14C'>TITANS WIN!</color>" + String.Newline + "(All Humans eliminated)", 
                 5
             );
             
-            if (Main._SlowMode) {
-            Time.TimeScale = Main._SlowModeScale; # slowmo ending
-                Game.End(2);
-            } else {
-                Game.End(10);
+            if (Network.IsMasterClient) {
+                ScoreSystem._TitanScore += 1;
+                Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                if (Main._SlowMode) {
+                self.ApplyEndSlowMo(); # slowmo ending
+                    Game.End(2);
+                } else {
+                    Game.End(10);
+                }
             }
         # Case 2: All player titans dead - check AI conditions
         } elif (Game.PlayerTitans.Count == 0) {
             # Full Clear mode requires eliminating all AI titans
             if (Main.FullClear) {
                 if (Game.AITitans.Count == 0) {
-                    ScoreSystem._HumanScore += 1;
-                    Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                    self._winHandled = true;
                     UI.SetLabelForTime("MiddleCenter",
                         "<color='#00FF00'>HUMANS WIN!</color>" + String.Newline + "(All Titans eliminated)", 
                         5
                     );
                     
-                    if (Main._SlowMode) {
-                        Time.TimeScale = Main._SlowModeScale;
-                        Game.End(2);
-                    } else {
-                        Game.End(10);
+                    if (Network.IsMasterClient) {
+                        ScoreSystem._HumanScore += 1;
+                        Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                        RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                        RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                        if (Main._SlowMode) {
+                            self.ApplyEndSlowMo();
+                            Game.End(2);
+                        } else {
+                            Game.End(10);
+                        }
                     }
                 } else {
                     UI.SetLabelAll("TopRight", "<color='#FF0000'>AIs left to win: </color>" + Game.AITitans.Count);
                 }
             } else {
                 if (Game.AITitans.Count < 5) {
-                    ScoreSystem._HumanScore += 1;
-                    Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                    self._winHandled = true;
                     UI.SetLabelForTime("MiddleCenter", 
                         "<color='#FFFF00'>AUTO-RESTARTING...</color>", 
                         3
                     );
                     
-                    if (Main._SlowMode) {
-                        Time.TimeScale = Main._SlowModeScale;
-                        Game.End(2);
-                    } else {
-                        Game.End(5);
+                    if (Network.IsMasterClient) {
+                        ScoreSystem._HumanScore += 1;
+                        Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                        RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                        RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                        if (Main._SlowMode) {
+                            self.ApplyEndSlowMo();
+                            Game.End(2);
+                        } else {
+                            Game.End(5);
+                        }
                     }
                 } elif (Network.IsMasterClient) {
+                    self._winHandled = true;
                     ScoreSystem._HumanScore += 1;
                     CommandSystem.ReviveAllHumans();
                     CommandSystem.ReviveAllPTs();
