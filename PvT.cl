@@ -45,8 +45,6 @@ class Main {
     _MinRespawnTime = 30.0;
     MinRespawnTimeTooltip = "Minimum possible respawn delay (cannot go below this).";
 
-    respawn_timer_keys = new List(); # Active timers
-
     _RespawnHumanScale = 1.0;
     _RespawnHumanScaleTooltip = "How much human respawn time reduces per missing teammate.";
 
@@ -103,7 +101,7 @@ class Main {
     _TitanAttackPause = 0.1;
 
 # System Toggles (no per-setting fields)
-    _EnableAhssUnlockSystem = false;
+    _EnableAhssUnlockSystem = true;
     _EnableDamageSystem = true;
     _EnableScoreSystem = true;
     _EnableMovementSystem = true;
@@ -114,10 +112,6 @@ class Main {
     _SlowModeTooltip = "If enabled, this will give a slow-motion ending when the last titan/player is killed.";
     _SlowModeScale = 0.3;
     _SlowModeScaleTooltip = "Time scale used for end-of-round slow motion.";
-
-# UI State
-    _rulesPopupCreated = false;
-    # _debugPopupCreated removed (debug popup removed)
 
 # Permission Messages
     _nopermission = "<color=#CC0000>Error: You do not have permission!</color>";
@@ -231,7 +225,6 @@ class Main {
         # Per-frame updates for enabled systems
         if (Main._EnableMovementSystem) {MovementSystem.TrackMovement(); DebugSystem.Inc("MovementFrame");}
         if (Main._EnableIdleSystem) {IdleSystem.OnFrame(); DebugSystem.Inc("IdleFrame");}
-        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnFrame(); DebugSystem.Inc("AHSSFrame");}
         if (Main._EnableTitanJumpCooldown) {
             TitanJumpCooldown.OnFrame();
             DebugSystem.Inc("TitanJumpFrame");
@@ -245,10 +238,6 @@ class Main {
         if (Main._EnableRespawnSystem) {RespawnSystem.OnSecond(); DebugSystem.Inc("RespawnSecond");}
         if (Main._EnableRockThrowSystem) {RockThrowSystem.OnSecond(); DebugSystem.Inc("RockThrowSecond");}
         if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.OnSecond(); DebugSystem.Inc("AHSSSecond");}
-        if (Main._EnableTitanJumpCooldown) {
-            TitanJumpCooldown.OnSecond();
-            DebugSystem.Inc("TitanJumpSecond");
-        }
         if (Main._EnableTeamSystem) {TeamSystem.CheckFinal1v1Lock(); DebugSystem.Inc("TeamSecond");}
         if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSecond();}
 
@@ -271,6 +260,7 @@ class Main {
         if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamSpawn");}
         if (Main._EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character); DebugSystem.Inc("RockThrowSpawn");}
         if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn(); DebugSystem.Inc("KTRSpawn");}
+        if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.EnforceLoadout(character);}
         PlayerTitanStats.OnCharacterSpawn(character);
     }
 
@@ -731,16 +721,12 @@ extension DamageSystem {
 extension DeathSystem {
     function HandleDeath(victim, killer, killerName) {
         # Process death events for revival and kill tracking
-         if (victim.Type == "Titan" && killer != null) {
+        if (victim.Type == "Titan" && killer != null && killer.Type == "Human") {
             value = 1;
-            if (killer.Type == "Human") {
-                if (killer.Weapon != "Blade") {
-                    value = 0.5;
-                }
+            if (killer.Weapon != "Blade") {
+                value = 0.5;
             }
-            if (killer.Type == "Human") {
-                KillToReviveSystem.ProcessKill("Human", killerName, value);
-            }
+            KillToReviveSystem.ProcessKill("Human", killerName, value);
         }
 
         if (victim.Type == "Human") {
@@ -760,9 +746,6 @@ extension NetworkSystem {
         
         if (message == "AHSS_LOCKED") {
             AHSSUnlockSystem._ahssUnlocked = true;
-        }
-        elif (String.StartsWith(message, "AHSS_UNLOCK|")) {
-            # Handle AHSS unlock sync
         }
         elif (message == "AHSS_EXHAUSTED") {
             AHSSUnlockSystem.HandleExhausted();
@@ -1305,7 +1288,7 @@ extension CommandSystem {
 
 extension AHSSUnlockSystem {
     # Configuration - adjust these values as needed
-    PointsForAHSS = 15;
+    PointsForAHSS = 5;
     AITitanPointValue = 1;
     PlayerTitanPointValue = 3;
     _ahssConfirmationEnabled = true;
@@ -1318,9 +1301,8 @@ extension AHSSUnlockSystem {
     _unlockPending = false;
     _unlockHoldSeconds = 0;
     _equipHoldSeconds = 0;
-    _lastAmmoRound = -1;
-    _lastAmmoLeft = -1;
     _manualLockHoldSeconds = 0;
+    _lowestAmmoTotal = 999;
     
     # Initialization
     function Initialize()
@@ -1332,11 +1314,10 @@ extension AHSSUnlockSystem {
         self._unlockPending = false;
         self._unlockHoldSeconds = 0;
         self._equipHoldSeconds = 0;
-        self._lastAmmoRound = -1;
-        self._lastAmmoLeft = -1;
         self._manualLockHoldSeconds = 0;
+        self._lowestAmmoTotal = 999;
     }
-    
+
     # Core functionality
     function ProcessTitanKill(victim, killer, killerName) {
         if (!Main._EnableAhssUnlockSystem) {return false;}
@@ -1413,59 +1394,50 @@ extension AHSSUnlockSystem {
         return true;
     }
 
-    function OnFrame()
-    {
-        if (!Main._EnableAhssUnlockSystem) {return;}
-
-        if (Network.MyPlayer == null || Network.MyPlayer.Character == null) {return;}
-        character = Network.MyPlayer.Character;
-        if (character.Type != "Human") {return;}
-        if (self._ahssUnlocked && !self.IsLocalUnlocker()) {
-            UI.SetLabel("BottomRight", "");
-            return;
-        }
-
-        if (self._unlockPending) {
-            UI.SetLabel("BottomRight", "Hold <color=yellow>'Reload'</color> for 2s to unlock AHSS");
-        }
-
-        # Auto-drop AHSS when ammo is exhausted
-        if (character.Weapon == "AHSS") {
-            # Detect gas-station refill by total ammo increase
-            if (self._lastAmmoLeft != -1 &&
-                character.CurrentAmmoLeft > self._lastAmmoLeft) {
-                self.MarkExhausted();
-                return;
-            }
-
-            if (character.CurrentAmmoRound <= 0 && character.CurrentAmmoLeft <= 0) {
-                self.MarkExhausted();
-                return;
-            }
-
-            self._lastAmmoRound = character.CurrentAmmoRound;
-            self._lastAmmoLeft = character.CurrentAmmoLeft;
-        }
-
-        # Prompt and allow switching back to AHSS after unlock
-        if (self._ahssUnlocked && !self._ahssExhausted && character.Weapon != "AHSS") {
-            UI.SetLabel("BottomRight", "Hold <color=yellow>'Reload'</color> for 2s to equip AHSS");
-        } else {
-            if (!self._unlockPending) {
-                UI.SetLabel("BottomRight", "");
-            }
-        }
-    }
-
     function OnSecond()
     {
         if (!Main._EnableAhssUnlockSystem) {return;}
         if (Network.MyPlayer == null || Network.MyPlayer.Character == null) {return;}
         character = Network.MyPlayer.Character;
         if (character.Type != "Human") {return;}
+
+        # Anti-cheat: Detect illegitimate AHSS (e.g., from gas station or menu)
+        if (character.Weapon == "AHSS") {
+            isLegitimate = self._ahssUnlocked && !self._ahssExhausted && self.IsLocalUnlocker();
+            if (!isLegitimate) {
+                character.SetWeapon("Blade");
+                UI.SetLabelForTime("MiddleCenter",
+                    "<size=24><color=#FF5555>AHSS must be unlocked through gameplay!</color></size>",
+                    3.0);
+                return;
+            }
+
+            # Auto-drop AHSS when ammo is exhausted
+            if (character.CurrentAmmoRound <= 0 && character.CurrentAmmoLeft <= 0) {
+                self.MarkExhausted();
+                return;
+            }
+
+            # Detect gas station refill - track lowest total ammo reached
+            # If total ever goes back UP after going down, it's a refill
+            currentTotal = character.CurrentAmmoRound + character.CurrentAmmoLeft;
+            if (currentTotal < self._lowestAmmoTotal) {
+                # They used ammo - update the lowest
+                self._lowestAmmoTotal = currentTotal;
+            } elif (currentTotal > self._lowestAmmoTotal) {
+                # Total went UP - they refilled!
+                self.MarkExhausted();
+                UI.SetLabelForTime("MiddleCenter",
+                    "<size=24><color=#FF5555>AHSS refill not allowed!</color></size>",
+                    3.0);
+                return;
+            }
+        }
+
         if (self._ahssUnlocked && !self.IsLocalUnlocker()) {return;}
 
         if (self._unlockPending) {
+            UI.SetLabelForTime("BottomRight", "Hold <color=yellow>'Reload'</color> for 2s to unlock AHSS", 15.0);
             if (Input.GetKeyHold("Human/Reload")) {
                 self._unlockHoldSeconds += 1;
                 if (self._unlockHoldSeconds >= 2) {
@@ -1480,6 +1452,7 @@ extension AHSSUnlockSystem {
         }
 
         if (self._ahssUnlocked && !self._ahssExhausted && character.Weapon != "AHSS") {
+            UI.SetLabelForTime("BottomRight", "Hold <color=yellow>'Reload'</color> for 2s to equip AHSS", 15.0);
             if (Input.GetKeyHold("Human/Reload")) {
                 self._equipHoldSeconds += 1;
                 if (self._equipHoldSeconds >= 2) {
@@ -1520,19 +1493,32 @@ extension AHSSUnlockSystem {
     {
         if (character.Type != "Human") {return;}
         character.SetWeapon("Blade");
-        self._lastAmmoRound = -1;
-        self._lastAmmoLeft = -1;
+    }
+
+    function EnforceLoadout(character)
+    {
+        # Prevent players from selecting AHSS in loadout menu
+        if (!Main._EnableAhssUnlockSystem) {return;}
+        if (character == null || character.Type != "Human") {return;}
+        if (!character.IsMine) {return;}
+
+        # If player spawned with AHSS, check if it's legitimate
+        if (character.Weapon == "AHSS") {
+            isLegitimate = self._ahssUnlocked && !self._ahssExhausted && self.IsLocalUnlocker();
+            if (!isLegitimate) {
+                character.SetWeapon("Blade");
+                UI.SetLabelForTime("MiddleCenter",
+                    "<size=24><color=#FF5555>AHSS must be unlocked through gameplay!</color></size>",
+                    3.0);
+            }
+        }
     }
 
     function MarkExhausted()
     {
         if (self._ahssExhausted) {return;}
         self._ahssExhausted = true;
-        if (Network.IsMasterClient) {
-            Network.SendMessageAll("AHSS_EXHAUSTED");
-        } else {
-            Network.SendMessageAll("AHSS_EXHAUSTED");
-        }
+        Network.SendMessageAll("AHSS_EXHAUSTED");
         character = Network.MyPlayer.Character;
         if (character != null && character.Type == "Human") {
             self.SwitchToBlades(character);
@@ -1558,8 +1544,6 @@ extension AHSSUnlockSystem {
         character.CurrentAmmoLeft = 3;
         character.MaxAmmoRound = 2;
         character.MaxAmmoTotal = 3;
-        self._lastAmmoRound = character.CurrentAmmoRound;
-        self._lastAmmoLeft = character.CurrentAmmoLeft;
         
         if (character.IsMine)
         {
@@ -1963,22 +1947,6 @@ extension ScoreSystem {
             }
         }
 
-        # Calculate performance ratios
-        kdr = self.f(x.Kills) / self.f(x.Deaths);
-        dmg = self.f(x.TotalDamage) / self.f(x.Kills);
-        
-        # Format for display (handle division by zero cases)
-        if (x.Kills > 0 && x.Deaths > 0) { 
-            kdr = String.FormatFloat(kdr, 2); 
-        } else { 
-            kdr = "-"; 
-        }
-        if (x.TotalDamage == 0) { 
-            dmg = "-"; 
-        } else { 
-            dmg = String.FormatFloat(dmg, 2); 
-        }
-        
         # Update scoreboard
         x.SetCustomProperty("KDRA", 
             x.Kills + " / " + x.Deaths + 
@@ -2039,12 +2007,6 @@ extension ScoreSystem {
             RoomData.SetProperty("titan_wins", self._TitanScore);
             TeamSystem.UpdateTeamUI();
         }
-    }
-    
-    # Safe float conversion with null checking
-    function f(inp) {
-        # Ensure numeric conversion is always valid
-        return Convert.ToFloat(inp);
     }
 }
 
@@ -2324,65 +2286,50 @@ extension TeamSystem {
 
 extension TitanJumpCooldown {
     _jumpKeyEnabled = true;
-    _jumpRoundTime = 0;
     _action = List();
-    
+
     function Init() {
         # Initialize jump cooldown state
-        # Initialize jump cooldown from Main config
         self._jumpKeyEnabled = true;
-        self._jumpRoundTime = 0;
         self._action = List();
     }
-    
+
     function OnFrame() {
         # Monitor jump animations and disable input
         if (!Main._EnableTitanJumpCooldown) { return; }
-        
+
         character = Network.MyPlayer.Character;
         if (character != null && character.Type == "Titan") {
             # Detect jump animation start
-            if (self._jumpKeyEnabled && 
+            if (self._jumpKeyEnabled &&
                 character.CurrentAnimation == "Amarture_VER2|attack.jumper.0") {
                 self._action.Add(character.CurrentAnimation);
                 self._jumpKeyEnabled = false;
                 self.DelayJump(Main._JumpCoolDown);
             }
-            
+
             # Handle post-jump actions
             if (!self._jumpKeyEnabled && self._action.Count != 0) {
-                if (!self._action.Contains(character.CurrentAnimation) && 
+                if (!self._action.Contains(character.CurrentAnimation) &&
                     character.CurrentAnimation == "Amarture_VER2|attack.jumper.1") {
                     self._action.Add(character.CurrentAnimation);
                     Input.SetKeyDefaultEnabled("Titan/Jump", false);
-                } elif (!self._action.Contains(character.CurrentAnimation) && 
+                } elif (!self._action.Contains(character.CurrentAnimation) &&
                        character.CurrentAnimation != "Amarture_VER2|attack.jumper.1") {
                     Input.SetKeyDefaultEnabled("Titan/Jump", false);
                 }
             }
         }
     }
-    
-    function OnSecond() {
-        # Decrease cooldown timer
-        if (!Main._EnableTitanJumpCooldown) { return; }
-        
-        # Update cooldown timer
-        if (!self._jumpKeyEnabled && self._jumpRoundTime > 0) {
-            self._jumpRoundTime -= 1;
-        }
-    }
-    
+
     coroutine DelayJump(seconds) {
         # Wait and then re-enable jump input
-        self._jumpRoundTime = seconds;
         wait seconds;
-        
+
         # Reset jump state
         Input.SetKeyDefaultEnabled("Titan/Jump", true);
         self._action.Clear();
         self._jumpKeyEnabled = true;
-        self._jumpRoundTime = 0;
     }
 }
 
