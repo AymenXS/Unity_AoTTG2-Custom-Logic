@@ -250,6 +250,7 @@ class Main {
             DebugSystem.Inc("TitanJumpSecond");
         }
         if (Main._EnableTeamSystem) {TeamSystem.CheckFinal1v1Lock(); DebugSystem.Inc("TeamSecond");}
+        if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSecond();}
 
         DebugSystem.ReportAndReset();
 
@@ -1644,6 +1645,7 @@ extension IdleSystem {
 extension KillToReviveSystem {
     _humanKillCounter = 0;
     _titanKillCounter = 0;
+    _ktrNotificationSeconds = 0;
 
     function ResetState() {
         # Reset kill counter and clear UI
@@ -1655,6 +1657,13 @@ extension KillToReviveSystem {
         # Reset on player spawn
         if (!Main.EnableKillToReviveSystem) {return;}
         self.ResetState();
+    }
+
+    function OnSecond() {
+        # Decrement KTR notification timer
+        if (self._ktrNotificationSeconds > 0) {
+            self._ktrNotificationSeconds = self._ktrNotificationSeconds - 1;
+        }
     }
 
     function GetLocalTeamType()
@@ -1692,6 +1701,13 @@ extension KillToReviveSystem {
         if (localTeam == "Titan") {
             killsNeeded = Main.KillsToReviveTitan;
         }
+
+        # Show kill progress notification for 3 seconds
+        UI.SetLabelForTime("BottomCenter",
+            "<size=24><color=#33FF33>Team kill! (" + Convert.ToString(Convert.ToInt(current)) + "/" + Convert.ToString(killsNeeded) + ")</color></size>",
+            3.0);
+        self._ktrNotificationSeconds = 3;
+
         if (current >= killsNeeded)
         {
             if (localTeam == "Human") {
@@ -1893,6 +1909,9 @@ extension RespawnSystem {
     function UpdateRespawnUI() {
         # Show respawn timer UI for local player
         if (!Main._EnableRespawnSystem) {return;}
+
+        # Skip if KTR notification is active
+        if (KillToReviveSystem._ktrNotificationSeconds > 0) {return;}
         
         # Get local player's status
         localPlayer = Network.MyPlayer;
