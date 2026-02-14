@@ -1,5 +1,5 @@
 #======================================================================
-# PvT GAME MODE CORE SCRIPT
+# PvT GAME MODE
 # Credits to Jibs & Sonic
 # Credits to Lavasuna for the BetterWaves CL
 #
