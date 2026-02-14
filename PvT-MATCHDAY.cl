@@ -1,9 +1,9 @@
 #======================================================================
-# PvT MATCHDAY - COMPETITIVE CORE
+# PvT - Light version for MATCHES
 # Credits to Jibs & Sonic
 # Credits to Lavasuna for the BetterWaves CL
 #
-# Light version for MATCHES.
+
 # Removed: Kill-to-Revive, Idle/AFK, Slow-motion, Respawn, AHSS Unlock, Final 1v1
 #
 # Features:
