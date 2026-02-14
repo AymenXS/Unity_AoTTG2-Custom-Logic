@@ -13,7 +13,6 @@
 # - Idle/AFK auto-kill and respawn
 # - Admin commands (revive, reset, scores)
 # - Network sync (wins, revive-all, damage credit)
-# - Titan jump cooldown
 # - Configurable player titan stats
 # - Slow-motion match ending
 #======================================================================
@@ -247,7 +246,7 @@ class Main {
         Final1v1System.OnCharacterSpawn(character);
         if (Main._EnableTeamSystem) {TeamSystem.OnCharacterSpawn(character); DebugSystem.Inc("TeamSpawn");}
         if (Main._EnableRockThrowSystem) {RockThrowSystem.HandleSpawn(character); DebugSystem.Inc("RockThrowSpawn");}
-        if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn(); DebugSystem.Inc("KTRSpawn");}
+        if (Main.EnableKillToReviveSystem) {KillToReviveSystem.OnSpawn(character); DebugSystem.Inc("KTRSpawn");}
         if (Main._EnableAhssUnlockSystem) {AHSSUnlockSystem.EnforceLoadout(character);}
         PlayerTitanStats.OnCharacterSpawn(character);
     }
@@ -1646,11 +1645,21 @@ extension KillToReviveSystem {
         # Reset kill counter and clear UI
         self._humanKillCounter = 0;
         self._titanKillCounter = 0;
+        Game.Debug("KillToRevive: ResetState -> counters cleared.");
     }
 
-    function OnSpawn() {
+    function OnSpawn(character) {
         # Reset on player spawn
         if (!Main.EnableKillToReviveSystem) {return;}
+        if (character == null || character.Player == null) {
+            Game.Debug("KillToRevive: OnSpawn -> null character/player; resetting counters.");
+        } else {
+            isLocal = (Network.MyPlayer != null && character.Player.ID == Network.MyPlayer.ID);
+            Game.Debug("KillToRevive: OnSpawn -> player_id=" + Convert.ToString(character.Player.ID) +
+                " name=" + character.Player.Name + " local=" + Convert.ToString(isLocal) +
+                " type=" + character.Type);
+        }
+        Game.Debug("KillToRevive: OnSpawn -> resetting counters.");
         self.ResetState();
     }
 
@@ -1691,6 +1700,8 @@ extension KillToReviveSystem {
             self._titanKillCounter += value;
             current = self._titanKillCounter;
         }
+        Game.Debug("KillToRevive: ProcessKill team=" + localTeam + " killer=" + killerName +
+            " value=" + Convert.ToString(value) + " current=" + Convert.ToString(current));
 
         killsNeeded = Main.KillsToReviveHuman;
         if (localTeam == "Titan") {
@@ -1777,6 +1788,8 @@ extension RespawnSystem {
                 }
                 
                 if (targetPlayer != null) {
+                    Game.Debug("RespawnSystem: SpawnPlayer id=" + Convert.ToString(targetPlayer.ID) +
+                        " key=" + key);
                     Game.SpawnPlayer(targetPlayer, false);
                 }
                 keys_to_remove.Add(key);
@@ -2173,6 +2186,7 @@ extension Final1v1System {
 extension TeamSystem {
     _aiClearWinQueued = false;
     _winHandled = false;
+    _roundResetPending = false;
 
     function ApplyEndSlowMo() {
         if (!Main._SlowMode) { return; }
@@ -2191,6 +2205,12 @@ extension TeamSystem {
     function OnCharacterSpawn(character) {
         if (!Main._EnableTeamSystem) {return;}
         self.UpdateTeamUI();
+        # Clear win lock after manual round reset once the first respawn occurs
+        if (self._roundResetPending) {
+            self._roundResetPending = false;
+            self._winHandled = false;
+            Game.Debug("TeamSystem: round reset completed; win lock cleared on first respawn.");
+        }
     }
 
     function OnCharacterDamaged(victim) {
@@ -2385,6 +2405,9 @@ extension TeamSystem {
                     }
                 } elif (Network.IsMasterClient) {
                     self._winHandled = true;
+                    self._roundResetPending = true;
+                    Final1v1System.ResetState();
+                    Game.Debug("TeamSystem: round reset triggered; Final1v1 lock reset, waiting for first respawn to clear win lock.");
                     ScoreSystem._HumanScore += 1;
                     CommandSystem.ReviveAllHumans();
                     CommandSystem.ReviveAllPTs();

@@ -3,7 +3,7 @@
 # Credits to Jibs & Sonic
 # Credits to Lavasuna for the BetterWaves CL
 #
-# Stripped-down version for competitive matches.
+# Light version for MATCHES.
 # Removed: Kill-to-Revive, Idle/AFK, Slow-motion, Respawn, AHSS Unlock, Final 1v1
 #
 # Features:
@@ -13,7 +13,6 @@
 # - Rock throw restrictions for PTs
 # - Admin commands (reset scores, mode toggle)
 # - Network sync (wins, damage credit)
-# - Titan jump cooldown
 # - Configurable player titan stats
 #======================================================================
 class Main {    
