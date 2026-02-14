@@ -2188,6 +2188,16 @@ extension TeamSystem {
     _winHandled = false;
     _roundResetPending = false;
 
+    function HasAnyPlayerTitan() {
+        # True if at least one player is on Titan side (alive or dead)
+        for (p in Network.Players) {
+            if (p != null && p.CharacterType == "Titan") {
+                return true;
+            }
+        }
+        return false;
+    }
+
     function ApplyEndSlowMo() {
         if (!Main._SlowMode) { return; }
         Network.SendMessageAll("slowmo");
@@ -2225,6 +2235,10 @@ extension TeamSystem {
 
     function OnCharacterDie(victim) {
         if (!Main._EnableTeamSystem) {return;}
+        # AI deaths must also trigger win checks (e.g. non-FullClear solo AI clear)
+        if (victim != null && victim.Type == "Titan" && victim.IsAI) {
+            self.CheckVictoryConditions();
+        }
         self.UpdateTeamUI();
     }
 
@@ -2359,6 +2373,10 @@ extension TeamSystem {
             }
         # Case 2: All player titans dead - check AI conditions
         } elif (Game.PlayerTitans.Count == 0) {
+            # Ignore titan-eliminated win flow if no PT players exist in the room
+            if (!self.HasAnyPlayerTitan()) {
+                return;
+            }
             # Full Clear mode requires eliminating all AI titans
             if (Main.FullClear) {
                 if (Game.AITitans.Count == 0) {
