@@ -27,6 +27,13 @@ class Main {
     _TeamOneScore = 0;           # Total human victories
     _TeamTwoScore = 0;           # Total titan victories
 
+    MatchRoundCountEnable = true;
+    MatchRoundCountEnableTooltip = "Match Round Count Enable";
+    MatchRoundTotal = 0;
+    MatchRoundTotalTooltip = "Round total shown as current/total. Set 0 for running rounds.";
+    MatchRoundManualInput = 1;
+    MatchRoundManualInputTooltip = "Manual round value used by #setround when no current value is provided.";
+
     FullClear = true;          # Victory mode
     FullClearTooltip = "When enabled, humans must eliminate ALL Titans (AIs + PTs) to win.";
 
@@ -131,7 +138,10 @@ class Main {
 
     function OnGameStart() {
         # Spawn initial AI titans
+        Game.Debug("Main.OnGameStart: called, current_epoch_before=" + Convert.ToString(TeamSystem._roundEpoch));
         Game.SpawnTitansAsync("Default", self.Titans);
+        TeamSystem.StartNewRoundEpoch();
+        Game.Debug("Main.OnGameStart: after StartNewRoundEpoch, current_epoch_after=" + Convert.ToString(TeamSystem._roundEpoch));
     }
 
     /*===== EVENT HANDLERS =====*/
@@ -163,10 +173,7 @@ class Main {
         # Damage processing and win checks
         if (Main._EnableDamageSystem) {DamageSystem.HandleDamage(victim, killer, killerName, damage); DebugSystem.Inc("Damage");}
         if (Main._EnableTeamSystem) {
-            # Check wins on any death (Human, Player Titan, or AI Titan in Full Clear)
-            if (victim != null && victim.Health <= 0) {
-                TeamSystem.CheckVictoryConditions();
-            }
+            # UI-only update path; win checks are resolved from OnCharacterDie.
             TeamSystem.UpdateTeamUI();
             DebugSystem.Inc("TeamDamage");
         }
@@ -174,7 +181,13 @@ class Main {
 
     function OnCharacterDie(victim, killer, killerName) {
         # Death handling for stats
-        if (Main._EnableTeamSystem) {TeamSystem.UpdateTeamUI(); DebugSystem.Inc("TeamDeath");}
+        if (Main._EnableTeamSystem) {
+            if (victim != null) {
+                TeamSystem.CheckVictoryConditions();
+            }
+            TeamSystem.UpdateTeamUI();
+            DebugSystem.Inc("TeamDeath");
+        }
     }   
 
     function OnNetworkMessage(sender, message) {
@@ -729,12 +742,18 @@ extension UISystem {
             "<size=24><color=#FFAA00>ADMIN COMMANDS</color></size>" + String.Newline +
             "• #resetkdall" + String.Newline +
             "• #setwins <human> <titan>" + String.Newline +
+            "• #setround [current] [total]" + String.Newline +
+            "• #setroundtotal <total>" + String.Newline +
+            "• #roundcount (toggle on/off)" + String.Newline +
             "• #mode (toggle FullClear)" + String.Newline +
             "• #clearchat"
         );
 
         # Hidden settings (underscore)
         settings = "<size=24><color=#55FF55>HIDDEN SETTINGS</color></size>" + String.Newline +
+            "MatchRoundCountEnable: " + Convert.ToString(Main.MatchRoundCountEnable) + String.Newline +
+            "MatchRoundTotal: " + Convert.ToString(Main.MatchRoundTotal) + String.Newline +
+            "MatchRoundManualInput: " + Convert.ToString(Main.MatchRoundManualInput) + String.Newline +
             "TitanAttackSpeed: " + Convert.ToString(Main._TitanAttackSpeed) + String.Newline +
             "TitanMaxStamina: " + Convert.ToString(Main._TitanMaxStamina) + String.Newline +
             "TitanStamina: " + Convert.ToString(Main._TitanStamina) + String.Newline +
@@ -797,6 +816,28 @@ extension RockThrowSystem {
 }
 
 extension CommandSystem {
+    function IsIntegerText(value) {
+        if (value == null) {return false;}
+        if (String.Length(value) == 0) {return false;}
+        body = value;
+        if (String.StartsWith(value, "-")) {
+            if (String.Length(value) == 1) {return false;}
+            body = String.Substring(value, 1);
+        }
+        stripped = body;
+        stripped = String.Replace(stripped, "0", "");
+        stripped = String.Replace(stripped, "1", "");
+        stripped = String.Replace(stripped, "2", "");
+        stripped = String.Replace(stripped, "3", "");
+        stripped = String.Replace(stripped, "4", "");
+        stripped = String.Replace(stripped, "5", "");
+        stripped = String.Replace(stripped, "6", "");
+        stripped = String.Replace(stripped, "7", "");
+        stripped = String.Replace(stripped, "8", "");
+        stripped = String.Replace(stripped, "9", "");
+        return String.Length(stripped) == 0;
+    }
+
     function HandleCommand(message) {
         if (String.StartsWith(message, "#")) {
             # Parse command and arguments
@@ -825,10 +866,70 @@ extension CommandSystem {
                 if (!Network.IsMasterClient) {
                     Game.Print(Main._nopermission);
                 } elif (listcmd.Count > 1) {
-                    ScoreSystem._HumanScore = Convert.ToInt(listcmd.Get(0));
-                    ScoreSystem._TitanScore = Convert.ToInt(listcmd.Get(1));
+                    humanRaw = listcmd.Get(0);
+                    titanRaw = listcmd.Get(1);
+                    if (!self.IsIntegerText(humanRaw) || !self.IsIntegerText(titanRaw)) {
+                        Game.Print("<color=#CC0000>Error: #setwins expects integers. Example: #setwins 5 2</color>");
+                        return false;
+                    }
+                    ScoreSystem._HumanScore = Convert.ToInt(humanRaw);
+                    ScoreSystem._TitanScore = Convert.ToInt(titanRaw);
                     Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
                     Game.Print("Scores set: Humans " + ScoreSystem._HumanScore + " - " + ScoreSystem._TitanScore + " Titans");
+                }
+                return false;
+            }
+
+            if (cmdword == "setround") {
+                if (!Network.IsMasterClient) {
+                    Game.Print(Main._nopermission);
+                } else {
+                    roundValue = Math.Max(Convert.ToInt(Main.MatchRoundManualInput), 1);
+                    if (listcmd.Count > 0) {
+                        roundValue = Math.Max(Convert.ToInt(listcmd.Get(0)), 1);
+                    }
+                    if (Main.MatchRoundTotal != null && Convert.ToInt(Main.MatchRoundTotal) > 0) {
+                        roundValue = Math.Min(roundValue, Convert.ToInt(Main.MatchRoundTotal));
+                    }
+                    TeamSystem._roundEpoch = roundValue;
+                    RoomData.SetProperty("round_epoch", TeamSystem._roundEpoch);
+                    TeamSystem._awardedEpoch = -1;
+                    TeamSystem._winHandled = false;
+                    if (listcmd.Count > 1) {
+                        Main.MatchRoundTotal = Math.Max(Convert.ToInt(listcmd.Get(1)), 0);
+                        if (Main.MatchRoundTotal > 0 && TeamSystem._roundEpoch > Main.MatchRoundTotal) {
+                            TeamSystem._roundEpoch = Main.MatchRoundTotal;
+                            RoomData.SetProperty("round_epoch", TeamSystem._roundEpoch);
+                        }
+                    }
+                    TeamSystem.UpdateTeamUI();
+                    Game.Print("Round counter set to " + Convert.ToString(TeamSystem._roundEpoch) + ". Auto increment remains enabled.");
+                }
+                return false;
+            }
+
+            if (cmdword == "setroundtotal") {
+                if (!Network.IsMasterClient) {
+                    Game.Print(Main._nopermission);
+                } elif (listcmd.Count > 0) {
+                    Main.MatchRoundTotal = Math.Max(Convert.ToInt(listcmd.Get(0)), 0);
+                    if (Main.MatchRoundTotal > 0 && TeamSystem._roundEpoch > Main.MatchRoundTotal) {
+                        TeamSystem._roundEpoch = Main.MatchRoundTotal;
+                        RoomData.SetProperty("round_epoch", TeamSystem._roundEpoch);
+                    }
+                    TeamSystem.UpdateTeamUI();
+                    Game.Print("Round total set to " + Convert.ToString(Main.MatchRoundTotal) + ". (0 means running rounds)");
+                }
+                return false;
+            }
+
+            if (cmdword == "roundcount") {
+                if (!Network.IsMasterClient) {
+                    Game.Print(Main._nopermission);
+                } else {
+                    Main.MatchRoundCountEnable = !Main.MatchRoundCountEnable;
+                    TeamSystem.UpdateTeamUI();
+                    Game.Print("Match Round Count Enable: " + Convert.ToString(Main.MatchRoundCountEnable));
                 }
                 return false;
             }
@@ -992,6 +1093,28 @@ extension ScoreSystem {
     _HumanScore = 0;
     _TitanScore = 0;
     
+    function IsIntegerText(value) {
+        if (value == null) {return false;}
+        if (String.Length(value) == 0) {return false;}
+        body = value;
+        if (String.StartsWith(value, "-")) {
+            if (String.Length(value) == 1) {return false;}
+            body = String.Substring(value, 1);
+        }
+        stripped = body;
+        stripped = String.Replace(stripped, "0", "");
+        stripped = String.Replace(stripped, "1", "");
+        stripped = String.Replace(stripped, "2", "");
+        stripped = String.Replace(stripped, "3", "");
+        stripped = String.Replace(stripped, "4", "");
+        stripped = String.Replace(stripped, "5", "");
+        stripped = String.Replace(stripped, "6", "");
+        stripped = String.Replace(stripped, "7", "");
+        stripped = String.Replace(stripped, "8", "");
+        stripped = String.Replace(stripped, "9", "");
+        return String.Length(stripped) == 0;
+    }
+    
     function UpdateScore(x, iskiller, damage, restarting) {
         # Update kills/deaths and damage stats
         if (!Main._EnableScoreSystem) {return;}
@@ -1052,10 +1175,20 @@ extension ScoreSystem {
             # Parse each pair
             for (pair in pairs) {
                 if (String.Contains(pair, "human_wins=")) {
-                    human = Convert.ToInt(String.Substring(pair, 11));
+                    humanRaw = String.Substring(pair, 11);
+                    if (self.IsIntegerText(humanRaw)) {
+                        human = Convert.ToInt(humanRaw);
+                    } else {
+                        Game.Debug("ScoreSystem: ignored invalid human_wins value in WinSync: " + humanRaw);
+                    }
                 }
                 elif (String.Contains(pair, "titan_wins=")) {
-                    titan = Convert.ToInt(String.Substring(pair, 11));
+                    titanRaw = String.Substring(pair, 11);
+                    if (self.IsIntegerText(titanRaw)) {
+                        titan = Convert.ToInt(titanRaw);
+                    } else {
+                        Game.Debug("ScoreSystem: ignored invalid titan_wins value in WinSync: " + titanRaw);
+                    }
                 }
             }
             
@@ -1070,10 +1203,81 @@ extension ScoreSystem {
 }
 
 extension TeamSystem {
+    _winHandled = false;
+    _roundEpoch = 0;
+    _awardedEpoch = -1;
+    _lastRoundUiEpoch = -1;
+
+    function StartNewRoundEpoch() {
+        persistedRound = Convert.ToInt(RoomData.GetProperty("round_epoch", 0));
+        if (Network.IsMasterClient) {
+            self._roundEpoch = Math.Max(persistedRound, self._roundEpoch) + 1;
+            if (Main.MatchRoundTotal != null && Convert.ToInt(Main.MatchRoundTotal) > 0) {
+                self._roundEpoch = Math.Min(self._roundEpoch, Convert.ToInt(Main.MatchRoundTotal));
+            }
+            RoomData.SetProperty("round_epoch", self._roundEpoch);
+        } else {
+            self._roundEpoch = Math.Max(persistedRound, self._roundEpoch);
+            if (self._roundEpoch < 1) {
+                self._roundEpoch = 1;
+            }
+            if (Main.MatchRoundTotal != null && Convert.ToInt(Main.MatchRoundTotal) > 0) {
+                self._roundEpoch = Math.Min(self._roundEpoch, Convert.ToInt(Main.MatchRoundTotal));
+            }
+        }
+        self._winHandled = false;
+        Game.Debug("TeamSystem: new round epoch=" + Convert.ToString(self._roundEpoch));
+    }
+
+    function SyncRoundEpochFromRoom() {
+        roomEpoch = Convert.ToInt(RoomData.GetProperty("round_epoch", self._roundEpoch));
+        if (Main.MatchRoundTotal != null && Convert.ToInt(Main.MatchRoundTotal) > 0) {
+            roomEpoch = Math.Min(roomEpoch, Convert.ToInt(Main.MatchRoundTotal));
+        }
+        if (roomEpoch > 0 && roomEpoch != self._roundEpoch) {
+            self._roundEpoch = roomEpoch;
+            Game.Debug("TeamSystem: synced round epoch from room=" + Convert.ToString(self._roundEpoch));
+        }
+    }
+
+    function TryLockRoundResult() {
+        if (self._awardedEpoch == self._roundEpoch) {
+            Game.Debug("TeamSystem: duplicate result blocked for epoch=" + Convert.ToString(self._roundEpoch));
+            return false;
+        }
+        self._awardedEpoch = self._roundEpoch;
+        self._winHandled = true;
+        Game.Debug("TeamSystem: round result locked for epoch=" + Convert.ToString(self._roundEpoch));
+        return true;
+    }
+
+    function HasAnyPlayerTitan() {
+        # True if at least one player is on Titan side (alive or dead)
+        for (p in Network.Players) {
+            if (p != null && p.CharacterType == "Titan") {
+                return true;
+            }
+        }
+        return false;
+    }
+
     function UpdateTeamUI() {
         # Update top-center team UI labels
         if (!Main._EnableTeamSystem) {return;}
+        self.SyncRoundEpochFromRoom();
         TeamScore = "";
+        RoundInfo = "";
+        if (Main.MatchRoundCountEnable) {
+            RoundText = Convert.ToString(self._roundEpoch);
+            if (Main.MatchRoundTotal != null && Convert.ToInt(Main.MatchRoundTotal) > 0) {
+                RoundText = RoundText + "/" + Convert.ToString(Convert.ToInt(Main.MatchRoundTotal));
+            }
+            RoundInfo = String.Newline + "<size=18><b><color='#33C7B5'>Round: " + RoundText + "</color></b></size>";
+            if (self._lastRoundUiEpoch != self._roundEpoch) {
+                self._lastRoundUiEpoch = self._roundEpoch;
+                Game.Debug("TeamSystem.UpdateTeamUI: rendered round label Round: " + RoundText);
+            }
+        }
         if (Main._ShowTeamScore) {
             TeamScore = String.Newline + "<size=20><color='#fe0000'>" + Main.TeamOneName + ": " + ScoreSystem._HumanScore + "</color> | " + "<color='#FFE14C'>" + Main.TeamTwoName + ": " + ScoreSystem._TitanScore + "</color></size>";
         }
@@ -1085,6 +1289,7 @@ extension TeamSystem {
             + " | <b><color='#AAAAAA'>AI</color></b> " + Game.AITitans.Count
             + " | <b><color='#FFE14C'>T</color></b> " + Game.PlayerTitans.Count
             + TeamScore
+            + RoundInfo
         );
     }
     
@@ -1120,51 +1325,64 @@ extension TeamSystem {
     function CheckVictoryConditions() {
         # Check and process win conditions
         if (!Main._EnableTeamSystem) {return;}
+        if (self._winHandled) {return;}
 
         # Case 1: All humans dead - Titans win
         if (Game.PlayerHumans.Count == 0) {
-            # Titans win condition
-            ScoreSystem._TitanScore += 1;
-            Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-            RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-            RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
-            UI.SetLabelForTime("MiddleCenter",
-                "<color='#FFE14C'>TITANS WIN!</color>" + String.Newline + "(All Humans eliminated)", 
-                5
-            );
-            
-            Game.End(10);
+            # Owned by game default restart, but sync custom room score once.
+            if (!self.TryLockRoundResult()) {return;}
+            Game.Debug("TeamSystem: branch=all_humans_dead (default restart, custom score sync)");
+            if (Network.IsMasterClient) {
+                ScoreSystem._TitanScore += 1;
+                Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                Game.End(10);
+            }
+            return;
         # Case 2: All player titans dead - check AI conditions
         } elif (Game.PlayerTitans.Count == 0) {
+            # Ignore titan-eliminated flow if no PT players exist in the room
+            if (!self.HasAnyPlayerTitan()) {
+                Game.Debug("TeamSystem: PT-eliminated flow skipped (no PT players in room)");
+                return;
+            }
             # Full Clear mode requires eliminating all AI titans
             if (Main.FullClear) {
                 if (Game.AITitans.Count == 0) {
-                    ScoreSystem._HumanScore += 1;
-                    Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                    # Owned by game default restart, but sync custom room score once.
+                    if (!self.TryLockRoundResult()) {return;}
+                    Game.Debug("TeamSystem: branch=full_clear_complete (default restart, custom score sync)");
+                    if (Network.IsMasterClient) {
+                        ScoreSystem._HumanScore += 1;
+                        Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                        RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                        RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                        Game.End(10);
+                    }
                     UI.SetLabelAll("TopRight", "");
-                    UI.SetLabelForTime("MiddleCenter",
-                        "<color='#00FF00'>HUMANS WIN!</color>" + String.Newline + "(All Titans eliminated)",
-                        5
-                    );
-
-                    Game.End(10);
+                    return;
                 } else {
                     UI.SetLabelAll("TopRight", "<color='#FF0000'>AIs left to win: </color>" + Game.AITitans.Count);
                 }
             } else {
                 if (Game.AITitans.Count < 5) {
-                    ScoreSystem._HumanScore += 1;
-                    Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
-                    RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
-                    RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                    if (!self.TryLockRoundResult()) {return;}
+                    Game.Debug("TeamSystem: branch=non_full_clear_pt_dead_ai_lt_5 (custom restart)");
+                    if (Network.IsMasterClient) {
+                        ScoreSystem._HumanScore += 1;
+                        Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
+                        RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+                        RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+                    }
                     UI.SetLabelForTime("MiddleCenter",
                         "<color='#FFFF00'>AUTO-RESTARTING...</color>",
                         3
                     );
 
-                    Game.End(5);
+                    if (Network.IsMasterClient) {
+                        Game.End(5);
+                    }
                 }
             }
         }
