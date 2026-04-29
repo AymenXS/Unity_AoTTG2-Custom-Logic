@@ -98,6 +98,12 @@ class Main {
 			ScoreSystem._TitanScore = RoomData.GetProperty("titan_wins", 0);
 		}
 
+		if (RoomData.GetProperty("names_swapped", false)) {
+			tmp = Main.TeamOneName;
+			Main.TeamOneName = Main.TeamTwoName;
+			Main.TeamTwoName = tmp;
+		}
+
 		if (Main._EnableTeamSystem) {
 			TeamSystem.FullClear = self.FullClear;
 		}
@@ -626,6 +632,9 @@ extension NetworkSystem {
 		elif (String.StartsWith(message, "KillCredit|")) {
 			DamageSystem.HandleKillCreditMessage(sender, message);
 		}
+		elif (String.StartsWith(message, "NameSwap:")) {
+			TeamSystem.HandleNameSwap(message);
+		}
 	}
 
 	function HandleClearChat(sender, message) {
@@ -746,6 +755,7 @@ String.Newline +
 "• #setwins <human> <titan>" + String.Newline +
 "• #setround [current]" + String.Newline +
 "• #roundcount (toggle on/off)" + String.Newline +
+"• #swap (swap team names + scores)" + String.Newline +
 "• #mode (toggle FullClear)" + String.Newline +
 "• #clearchat" + String.Newline +
 "• #hidden (show hidden settings)"
@@ -929,6 +939,31 @@ extension CommandSystem {
 					TeamSystem.BroadcastRound();
 					Game.Print("Match Round Count Enable: " + Convert.ToString(Main.MatchRoundCountEnable));
 				}
+				return false;
+			}
+
+			if (cmdword == "swap") {
+				if (!Network.IsMasterClient) {
+					Game.Print(Main._nopermission);
+					return false;
+				}
+				tmp = Main.TeamOneName;
+				Main.TeamOneName = Main.TeamTwoName;
+				Main.TeamTwoName = tmp;
+				tmpScore = ScoreSystem._HumanScore;
+				ScoreSystem._HumanScore = ScoreSystem._TitanScore;
+				ScoreSystem._TitanScore = tmpScore;
+				swapped = RoomData.GetProperty("names_swapped", false);
+				RoomData.SetProperty("names_swapped", !swapped);
+				RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+				RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
+				Network.SendMessageAll(
+					"NameSwap:" + Main.TeamOneName + "|" + Main.TeamTwoName +
+					"|" + Convert.ToString(ScoreSystem._HumanScore) +
+					"|" + Convert.ToString(ScoreSystem._TitanScore)
+				);
+				TeamSystem.UpdateTeamUI();
+				Game.Print("Teams swapped: " + Main.TeamOneName + " / " + Main.TeamTwoName);
 				return false;
 			}
 
@@ -1341,6 +1376,20 @@ extension TeamSystem {
 			self._roundEpoch = epoch;
 			RoomData.SetProperty("round_epoch", self._roundEpoch);
 		}
+		self.UpdateTeamUI();
+	}
+
+	function HandleNameSwap(message) {
+		# message format: NameSwap:<name1>|<name2>|<score1>|<score2>
+		data = String.Substring(message, 9);
+		parts = String.Split(data, "|");
+		if (parts.Count < 4) { return; }
+		Main.TeamOneName = parts.Get(0);
+		Main.TeamTwoName = parts.Get(1);
+		ScoreSystem._HumanScore = Convert.ToInt(parts.Get(2));
+		ScoreSystem._TitanScore = Convert.ToInt(parts.Get(3));
+		RoomData.SetProperty("human_wins", ScoreSystem._HumanScore);
+		RoomData.SetProperty("titan_wins", ScoreSystem._TitanScore);
 		self.UpdateTeamUI();
 	}
 
