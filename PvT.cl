@@ -101,7 +101,7 @@ class Main {
     _JumpCoolDown = 3.0;  # Cooldown in seconds
 
 # Titan Stats
-    _TitanAttackSpeed = 1.5;
+    _TitanAttackSpeed = 1.2;
     _TitanMaxStamina = 20; 
     _TitanStamina = 20; 
     _TitanAttackPause = 0.1;
