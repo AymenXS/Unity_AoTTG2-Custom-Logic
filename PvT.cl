@@ -107,7 +107,7 @@ class Main {
     _TitanAttackPause = 0.1;
 
 # System Toggles (no per-setting fields)
-    _EnableAhssUnlockSystem = false;
+    _EnableAhssUnlockSystem = true;
     _EnableDamageSystem = true;
     _EnableScoreSystem = true;
     _EnableMovementSystem = true;
@@ -140,7 +140,6 @@ class Main {
     _SuperDebugConsoleEnabled = false;
     _SuperDebugSampleEveryFrames = 10;
     _DebugStartOnLaunch = false;
-
 
  /*===== INITIALIZATION =====*/
     function Init() {
@@ -770,6 +769,9 @@ extension NetworkSystem {
         elif (String.StartsWith(message, "WinSync:")) {
             ScoreSystem.HandleWinSync(message);
         }
+        elif (String.StartsWith(message, "RoundSync:")) {
+            TeamSystem.HandleRoundSync(message);
+        }
         elif (String.StartsWith(message, "slowmo")) {
             self.HandleSlowMo(message);
         }
@@ -846,6 +848,9 @@ extension UISystem {
         }
         elif (buttonName == "CloseAdminRules") {
             UI.HidePopup("AdminRulesPopup");
+        }
+        elif (buttonName == "CloseHidden") {
+            UI.HidePopup("HiddenPopup");
         }
     }
 
@@ -926,7 +931,6 @@ extension UISystem {
         self._rulesPopupCreated = true;
     }
 
-
     function ShowRulesPopup() {
         # Lazy-create then show rules popup
         if (!self._rulesPopupCreated) {
@@ -948,16 +952,36 @@ extension UISystem {
             "• #reviveallpt" + String.Newline +
             "• #reviveallhumans" + String.Newline +
             "• #setwins <human> <titan>" + String.Newline +
-            "• #setround [current] [total]" + String.Newline +
-            "• #setroundtotal <total>" + String.Newline +
+            "• #setround [current]" + String.Newline +
             "• #roundcount (toggle on/off)" + String.Newline +
             "• #mode (toggle FullClear)" + String.Newline +
             "• #slowmo (toggle)" + String.Newline +
-            "• #clearchat"
+            "• #clearchat" + String.Newline +
+            "• #hidden (show hidden settings)"
         );
 
-        # Hidden settings (underscore)
-        settings = "<size=24><color=#55FF55>HIDDEN SETTINGS</color></size>" + String.Newline +
+        UI.AddPopupBottomButton("AdminRulesPopup", "CloseAdminRules",
+            UI.WrapStyleTag("CLOSE", "color", "#FFFFFF"));
+
+        self._adminRulesPopupCreated = true;
+    }
+
+    function ShowAdminRulesPopup() {
+        if (!self._adminRulesPopupCreated) {
+            self.CreateAdminRulesPopup();
+        }
+        UI.ShowPopup("AdminRulesPopup");
+    }
+
+    _hiddenPopupCreated = false;
+
+    function CreateHiddenPopup() {
+        if (self._hiddenPopupCreated) {return;}
+
+        UI.CreatePopup("HiddenPopup", "PvT - HIDDEN SETTINGS", 900, 700);
+
+        UI.AddPopupLabel("HiddenPopup",
+            "<size=24><color=#55FF55>HIDDEN SETTINGS</color></size>" + String.Newline +
             "RespawnHumanScale: " + Convert.ToString(Main._RespawnHumanScale) + String.Newline +
             "RespawnTitanScale: " + Convert.ToString(Main._RespawnTitanScale) + String.Newline +
             "ReviveAllDelay: " + Convert.ToString(Main._ReviveAllDelay) + String.Newline +
@@ -973,24 +997,22 @@ extension UISystem {
             "TitanAttackPause: " + Convert.ToString(Main._TitanAttackPause) + String.Newline +
             "JumpCoolDown: " + Convert.ToString(Main._JumpCoolDown) + String.Newline +
             "BaseRespawnTime: " + Convert.ToString(Main._BaseRespawnTime) + String.Newline +
-            "MinRespawnTime: " + Convert.ToString(Main._MinRespawnTime);
+            "MinRespawnTime: " + Convert.ToString(Main._MinRespawnTime)
+        );
 
-        UI.AddPopupLabel("AdminRulesPopup", String.Newline + settings);
-
-        UI.AddPopupBottomButton("AdminRulesPopup", "CloseAdminRules",
+        UI.AddPopupBottomButton("HiddenPopup", "CloseHidden",
             UI.WrapStyleTag("CLOSE", "color", "#FFFFFF"));
 
-        self._adminRulesPopupCreated = true;
+        self._hiddenPopupCreated = true;
     }
 
-    function ShowAdminRulesPopup() {
-        if (!self._adminRulesPopupCreated) {
-            self.CreateAdminRulesPopup();
-        }
-        UI.ShowPopup("AdminRulesPopup");
+    function ShowHiddenPopup() {
+        # Recreate each time so values are fresh
+        self._hiddenPopupCreated = false;
+        self.CreateHiddenPopup();
+        UI.ShowPopup("HiddenPopup");
     }
 
-    
 }
 
 extension RockThrowSystem {
@@ -1140,30 +1162,8 @@ extension CommandSystem {
                     RoomData.SetProperty("round_epoch", TeamSystem._roundEpoch);
                     TeamSystem._awardedEpoch = -1;
                     TeamSystem._winHandled = false;
-                    if (listcmd.Count > 1) {
-                        Main.MatchRoundTotal = Math.Max(Convert.ToInt(listcmd.Get(1)), 0);
-                        if (Main.MatchRoundTotal > 0 && TeamSystem._roundEpoch > Main.MatchRoundTotal) {
-                            TeamSystem._roundEpoch = Main.MatchRoundTotal;
-                            RoomData.SetProperty("round_epoch", TeamSystem._roundEpoch);
-                        }
-                    }
-                    TeamSystem.UpdateTeamUI();
+                    TeamSystem.BroadcastRound();
                     Game.Print("Round counter set to " + Convert.ToString(TeamSystem._roundEpoch) + ". Auto increment remains enabled.");
-                }
-                return false;
-            }
-
-            if (cmdword == "setroundtotal") {
-                if (!Network.IsMasterClient) {
-                    Game.Print(Main._nopermission);
-                } elif (listcmd.Count > 0) {
-                    Main.MatchRoundTotal = Math.Max(Convert.ToInt(listcmd.Get(0)), 0);
-                    if (Main.MatchRoundTotal > 0 && TeamSystem._roundEpoch > Main.MatchRoundTotal) {
-                        TeamSystem._roundEpoch = Main.MatchRoundTotal;
-                        RoomData.SetProperty("round_epoch", TeamSystem._roundEpoch);
-                    }
-                    TeamSystem.UpdateTeamUI();
-                    Game.Print("Round total set to " + Convert.ToString(Main.MatchRoundTotal) + ". (0 means running rounds)");
                 }
                 return false;
             }
@@ -1173,7 +1173,7 @@ extension CommandSystem {
                     Game.Print(Main._nopermission);
                 } else {
                     Main.MatchRoundCountEnable = !Main.MatchRoundCountEnable;
-                    TeamSystem.UpdateTeamUI();
+                    TeamSystem.BroadcastRound();
                     Game.Print("Match Round Count Enable: " + Convert.ToString(Main.MatchRoundCountEnable));
                 }
                 return false;
@@ -1330,6 +1330,14 @@ extension CommandSystem {
                     return false;
                 }
                 UISystem.ShowAdminRulesPopup();
+                return false;
+            }
+            if (cmdword == "hidden") {
+                if (!Network.IsMasterClient) {
+                    Game.Print(Main._nopermission);
+                    return false;
+                }
+                UISystem.ShowHiddenPopup();
                 return false;
             }
 
@@ -1740,21 +1748,11 @@ extension KillToReviveSystem {
         # Reset kill counter and clear UI
         self._humanKillCounter = 0;
         self._titanKillCounter = 0;
-        Game.Debug("KillToRevive: ResetState -> counters cleared.");
     }
 
     function OnSpawn(character) {
         # Reset on player spawn
         if (!Main.EnableKillToReviveSystem) {return;}
-        if (character == null || character.Player == null) {
-            Game.Debug("KillToRevive: OnSpawn -> null character/player; resetting counters.");
-        } else {
-            isLocal = (Network.MyPlayer != null && character.Player.ID == Network.MyPlayer.ID);
-            Game.Debug("KillToRevive: OnSpawn -> player_id=" + Convert.ToString(character.Player.ID) +
-                " name=" + character.Player.Name + " local=" + Convert.ToString(isLocal) +
-                " type=" + character.Type);
-        }
-        Game.Debug("KillToRevive: OnSpawn -> resetting counters.");
         self.ResetState();
     }
 
@@ -1795,9 +1793,6 @@ extension KillToReviveSystem {
             self._titanKillCounter += value;
             current = self._titanKillCounter;
         }
-        Game.Debug("KillToRevive: ProcessKill team=" + localTeam + " killer=" + killerName +
-            " value=" + Convert.ToString(value) + " current=" + Convert.ToString(current));
-
         killsNeeded = Main.KillsToReviveHuman;
         if (localTeam == "Titan") {
             killsNeeded = Main.KillsToReviveTitan;
@@ -1883,8 +1878,6 @@ extension RespawnSystem {
                 }
                 
                 if (targetPlayer != null) {
-                    Game.Debug("RespawnSystem: SpawnPlayer id=" + Convert.ToString(targetPlayer.ID) +
-                        " key=" + key);
                     Game.SpawnPlayer(targetPlayer, false);
                 }
                 keys_to_remove.Add(key);
@@ -2137,16 +2130,12 @@ extension ScoreSystem {
                     humanRaw = String.Substring(pair, 11);
                     if (self.IsIntegerText(humanRaw)) {
                         human = Convert.ToInt(humanRaw);
-                    } else {
-                        Game.Debug("ScoreSystem: ignored invalid human_wins value in WinSync: " + humanRaw);
                     }
                 }
                 elif (String.Contains(pair, "titan_wins=")) {
                     titanRaw = String.Substring(pair, 11);
                     if (self.IsIntegerText(titanRaw)) {
                         titan = Convert.ToInt(titanRaw);
-                    } else {
-                        Game.Debug("ScoreSystem: ignored invalid titan_wins value in WinSync: " + titanRaw);
                     }
                 }
             }
@@ -2326,6 +2315,8 @@ extension TeamSystem {
                 self._roundEpoch = Math.Min(self._roundEpoch, Convert.ToInt(Main.MatchRoundTotal));
             }
             RoomData.SetProperty("round_epoch", self._roundEpoch);
+            # Delay so clients finish loading before receiving the sync
+            self.DelayedRoundSync(self._roundEpoch);
         } else {
             self._roundEpoch = Math.Max(persistedRound, self._roundEpoch);
             if (self._roundEpoch < 1) {
@@ -2337,7 +2328,28 @@ extension TeamSystem {
         }
         self._winHandled = false;
         self._aiClearWinQueued = false;
-        Game.Debug("TeamSystem: new round epoch=" + Convert.ToString(self._roundEpoch));
+    }
+
+    coroutine DelayedRoundSync(epoch) {
+        wait 2.0;
+        Network.SendMessageAll("RoundSync:" + Convert.ToString(epoch));
+    }
+
+    function BroadcastRound() {
+        if (Network.IsMasterClient) {
+            Network.SendMessageAll("RoundSync:" + Convert.ToString(self._roundEpoch));
+        }
+    }
+
+    function HandleRoundSync(message) {
+        # message format: RoundSync:<epoch>
+        epochStr = String.Substring(message, 10);
+        epoch = Convert.ToInt(epochStr);
+        if (epoch > 0) {
+            self._roundEpoch = epoch;
+            RoomData.SetProperty("round_epoch", self._roundEpoch);
+        }
+        self.UpdateTeamUI();
     }
 
     function SyncRoundEpochFromRoom() {
@@ -2347,19 +2359,16 @@ extension TeamSystem {
         }
         if (roomEpoch > 0 && roomEpoch != self._roundEpoch) {
             self._roundEpoch = roomEpoch;
-            Game.Debug("TeamSystem: synced round epoch from room=" + Convert.ToString(self._roundEpoch));
         }
     }
 
     function TryLockRoundResult() {
         # Prevent double-awards in the same round epoch.
         if (self._awardedEpoch == self._roundEpoch) {
-            Game.Debug("TeamSystem: duplicate result blocked for epoch=" + Convert.ToString(self._roundEpoch));
             return false;
         }
         self._awardedEpoch = self._roundEpoch;
         self._winHandled = true;
-        Game.Debug("TeamSystem: round result locked for epoch=" + Convert.ToString(self._roundEpoch));
         return true;
     }
 
@@ -2394,7 +2403,6 @@ extension TeamSystem {
         if (self._roundResetPending) {
             self._roundResetPending = false;
             self.StartNewRoundEpoch();
-            Game.Debug("TeamSystem: round reset completed; win lock cleared on first respawn.");
         }
     }
 
@@ -2493,7 +2501,6 @@ extension TeamSystem {
         if (Final1v1System.IsLocked()) {
             if (Game.PlayerHumans.Count == 0) {
                 if (!self.TryLockRoundResult()) {return;}
-                Game.Debug("TeamSystem: branch=final1v1_titans_win");
                 UI.SetLabelForTime("MiddleCenter",
                     "<color=#FFE14C>TITANS WIN!</color>" + String.Newline + "(Final 1v1)",
                     5
@@ -2513,7 +2520,6 @@ extension TeamSystem {
                 return;
             } elif (Game.PlayerTitans.Count == 0) {
                 if (!self.TryLockRoundResult()) {return;}
-                Game.Debug("TeamSystem: branch=final1v1_humans_win");
                 UI.SetLabelForTime("MiddleCenter",
                     "<color=#00FF00>HUMANS WIN!</color>" + String.Newline + "(Final 1v1)",
                     5
@@ -2537,7 +2543,6 @@ extension TeamSystem {
         if (Game.PlayerHumans.Count == 0) {
             # Owned by game default restart, but sync custom room score once.
             if (!self.TryLockRoundResult()) {return;}
-            Game.Debug("TeamSystem: branch=all_humans_dead (default restart, custom score sync)");
             if (Network.IsMasterClient) {
                 ScoreSystem._TitanScore += 1;
                 Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
@@ -2555,7 +2560,6 @@ extension TeamSystem {
         } elif (Game.PlayerTitans.Count == 0) {
             # Ignore titan-eliminated win flow if no PT players exist in the room
             if (!self.HasAnyPlayerTitan()) {
-                Game.Debug("TeamSystem: PT-eliminated flow skipped (no PT players in room)");
                 return;
             }
             # Full Clear mode requires eliminating all AI titans
@@ -2563,7 +2567,6 @@ extension TeamSystem {
                 if (Game.AITitans.Count == 0) {
                     # Owned by game default restart, but sync custom room score once.
                     if (!self.TryLockRoundResult()) {return;}
-                    Game.Debug("TeamSystem: branch=full_clear_complete (default restart, custom score sync)");
                     if (Network.IsMasterClient) {
                         ScoreSystem._HumanScore += 1;
                         Network.SendMessageAll("WinSync:human_wins=" + ScoreSystem._HumanScore + ";titan_wins=" + ScoreSystem._TitanScore);
@@ -2583,7 +2586,6 @@ extension TeamSystem {
             } else {
                 if (Game.AITitans.Count < 5) {
                     if (!self.TryLockRoundResult()) {return;}
-                    Game.Debug("TeamSystem: branch=non_full_clear_pt_dead_ai_lt_5 (custom restart)");
                     UI.SetLabelForTime("MiddleCenter", 
                         "<color='#FFFF00'>AUTO-RESTARTING...</color>", 
                         3
@@ -2603,10 +2605,8 @@ extension TeamSystem {
                     }
                 } elif (Network.IsMasterClient) {
                     if (!self.TryLockRoundResult()) {return;}
-                    Game.Debug("TeamSystem: branch=non_full_clear_pt_dead_ai_gte_5 (manual round reset)");
                     self._roundResetPending = true;
                     Final1v1System.ResetState();
-                    Game.Debug("TeamSystem: round reset triggered; Final1v1 lock reset, waiting for first respawn to clear win lock.");
                     ScoreSystem._HumanScore += 1;
                     CommandSystem.ReviveAllHumans();
                     CommandSystem.ReviveAllPTs();
